@@ -51,6 +51,10 @@ The demo reuses the parent folder’s data generator, database initialization sc
 | Service accounts | `app-manager` (creates topics), `sr` (Schema Registry access), `client` (Kafka Connect worker and connectors), with role bindings and API keys |
 | Topics | One compacted Kafka topic per table (20), Kafka Connect internal topics and the Debezium schema history topic |
 
+The environment as it appears in the Confluent Cloud console after `./start.sh`: the `cc-demo-main` Standard cluster running on AWS `eu-central-1`, 24 topics and the Essentials governance package. It shows 0 connectors because they run self-managed in your Docker, not in Confluent Cloud.
+
+![Confluent Cloud environment created by Terraform](docs/confluent_cloud-environment.png)
+
 The settings are plain Terraform variables with defaults in [`terraform/vars.tf`](terraform/vars.tf) (`cc_cloud_provider`, `cc_cloud_region`, `cc_env_name`, `cc_cluster_name`, `cc_availability`, `stream_governance`). Override any of them with `TF_VAR_...`, for example to use another region:
 
 ```bash
@@ -111,6 +115,24 @@ delete from dbo.addresses where address_id = (select min(address_id) from dbo.ad
 * **Topics** → `data_sensors` → **Messages**: the key is the primary key and the value is the row. A delete appears as a record with a `null` value (a tombstone). The **Schema** tab shows the Avro schema registered in Schema Registry.
 * **Connectors**: none are listed in Confluent Cloud because the Kafka Connect worker and connectors run in your Docker environment. **Consumers** shows the `connect-postgres-sink` and `connect-db2-sink` groups and their lag.
 * **Environment** → **Stream Governance**: the Essentials Schema Registry, with one subject pair (`-key` / `-value`) per table.
+
+What these look like once the connectors are running:
+
+**Topics**: the 24 topics Terraform created (20 tables, the Kafka Connect internal topics and the Debezium schema history topic), one partition each.
+
+![Kafka topics in Confluent Cloud](docs/confluent_cloud-kafka_topics.png)
+
+**Messages** of `data_sensors`: the key is the primary key (`sensor_id`) and the value is the flat row. Records with an empty value (`sensor_id` 5 and 13 here) are tombstones from sensors that were deleted; the next record is the replacement sensor inserted in the same transaction.
+
+![data_sensors messages in Confluent Cloud, including tombstones](docs/confluent_cloud-data_sensors-topic.png)
+
+**Schema** of `data_sensors`: the Avro value schema registered in Schema Registry from the SQL Server table, with `Decimal` logical types for `temperature` and `pressure` and backward compatibility enforced.
+
+![data_sensors Avro schema in Schema Registry](docs/confluent_cloud-data_sensors-schema.png)
+
+**Stream lineage**: the data flow end to end, from the Debezium source connector's producer through the table topics to the consumer groups of the two sink connectors (PostgreSQL and Db2).
+
+![Stream lineage in Confluent Cloud](docs/confluent_cloud-stream_lineage.png)
 
 **5. Kafka Connect from the command line:** `curl -s localhost:8083/connectors?expand=status`, or `docker logs -f connect`.
 
