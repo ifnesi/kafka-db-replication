@@ -1,0 +1,285 @@
+# SQL Server (CDC) -> Confluent Platform -> PostgreSQL + IBM Db2
+# Versions can be overridden with env vars (see README).
+
+services:
+
+  # ------------------------------------------------------------------ Confluent Platform
+  broker:
+    image: confluentinc/cp-server:${CP_VERSION:-8.2.0}
+    hostname: broker
+    container_name: broker
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_METRIC_REPORTERS: io.confluent.telemetry.reporter.TelemetryReporter
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: broker:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@broker:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://broker:29092,CONTROLLER://broker:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CONFLUENT_METRICS_ENABLE: 'true'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      # Telemetry -> Prometheus (feeds Control Center)
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_TYPE: "http"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_ENABLED: "true"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_METRICS_INCLUDE: "io.confluent.kafka.server.request.(?!.*delta).*|io.confluent.kafka.server.server.broker.state|io.confluent.kafka.server.replica.manager.leader.count|io.confluent.kafka.server.request.queue.size|io.confluent.kafka.server.broker.topic.failed.produce.requests.rate.1.min|io.confluent.kafka.server.tier.archiver.total.lag|io.confluent.kafka.server.request.total.time.ms.p99|io.confluent.kafka.server.broker.topic.failed.fetch.requests.rate.1.min|io.confluent.kafka.server.broker.topic.total.fetch.requests.rate.1.min|io.confluent.kafka.server.partition.caught.up.replicas.count|io.confluent.kafka.server.partition.observer.replicas.count|io.confluent.kafka.server.tier.tasks.num.partitions.in.error|io.confluent.kafka.server.broker.topic.bytes.out.rate.1.min|io.confluent.kafka.server.request.total.time.ms.p95|io.confluent.kafka.server.controller.active.controller.count|io.confluent.kafka.server.request.total.time.ms.p999|io.confluent.kafka.server.controller.active.broker.count|io.confluent.kafka.server.request.handler.pool.request.handler.avg.idle.percent.rate.1.min|io.confluent.kafka.server.controller.unclean.leader.elections.rate.1.min|io.confluent.kafka.server.replica.manager.partition.count|io.confluent.kafka.server.controller.unclean.leader.elections.total|io.confluent.kafka.server.partition.replicas.count|io.confluent.kafka.server.broker.topic.total.produce.requests.rate.1.min|io.confluent.kafka.server.controller.offline.partitions.count|io.confluent.kafka.server.socket.server.network.processor.avg.idle.percent|io.confluent.kafka.server.partition.under.replicated|io.confluent.kafka.server.log.log.start.offset|io.confluent.kafka.server.log.tier.size|io.confluent.kafka.server.log.size|io.confluent.kafka.server.tier.fetcher.bytes.fetched.total|io.confluent.kafka.server.request.total.time.ms.p50|io.confluent.kafka.server.tenant.consumer.lag.offsets|io.confluent.kafka.server.log.log.end.offset|io.confluent.kafka.server.broker.topic.bytes.in.rate.1.min|io.confluent.kafka.server.partition.under.min.isr|io.confluent.kafka.server.partition.in.sync.replicas.count|io.confluent.telemetry.http.exporter.batches.dropped|io.confluent.telemetry.http.exporter.items.total|io.confluent.telemetry.http.exporter.items.succeeded|io.confluent.telemetry.http.exporter.send.time.total.millis|io.confluent.kafka.server.controller.leader.election.rate.(?!.*delta).*|io.confluent.telemetry.http.exporter.batches.failed"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_CLIENT_BASE_URL: "http://prometheus:9090/api/v1/otlp"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_CLIENT_COMPRESSION: "gzip"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_API_KEY: "dummy"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_API_SECRET: "dummy"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_BUFFER_PENDING_BATCHES_MAX: "80"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_BUFFER_BATCH_ITEMS_MAX: "4000"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_BUFFER_INFLIGHT_SUBMISSIONS_MAX: "10"
+      KAFKA_CONFLUENT_TELEMETRY_METRICS_COLLECTOR_INTERVAL_MS: "60000"
+      KAFKA_CONFLUENT_TELEMETRY_REMOTECONFIG_CONFLUENT_ENABLED: "false"
+      KAFKA_CONFLUENT_CONSUMER_LAG_EMITTER_ENABLED: "true"
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:${CP_VERSION:-8.2.0}
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      - broker
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'broker:29092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  # Connect worker with Debezium SQL Server + JDBC connectors and the Db2 driver baked in
+  connect:
+    build:
+      context: ./connect
+      args:
+        CP_VERSION: ${CP_VERSION:-8.2.0}
+        DEBEZIUM_SQLSERVER_VERSION: ${DEBEZIUM_SQLSERVER_VERSION:-3.1.2}
+        JDBC_CONNECTOR_VERSION: ${JDBC_CONNECTOR_VERSION:-latest}
+    image: db-replication-connect:local
+    hostname: connect
+    container_name: connect
+    depends_on:
+      - broker
+      - schema-registry
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: 'broker:29092'
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_GROUP_ID: compose-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+
+  prometheus:
+    image: confluentinc/cp-enterprise-prometheus:${CP_PROMETHEUS:-2.7.0}
+    hostname: cp-enterprise-prometheus
+    container_name: prometheus
+    volumes:
+      - ./vol/config:/mnt/config
+    ports:
+      - "9090:9090"
+    environment:
+      CONFIG_PATH: "/mnt/config"
+      SHOULD_LOG_TO_FILE: false
+
+  alertmanager:
+    image: confluentinc/cp-enterprise-alertmanager:${CP_ALERTMANAGER:-2.7.0}
+    hostname: cp-enterprise-alertmanager
+    container_name: alertmanager
+    depends_on:
+      - prometheus
+    volumes:
+      - ./vol/config:/mnt/config
+    ports:
+      - "9093:9093"
+    environment:
+      CONFIG_PATH: "/mnt/config"
+      SHOULD_LOG_TO_FILE: false
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center-next-gen:${CP_C3:-2.7.0}
+    hostname: control-center
+    container_name: control-center
+    depends_on:
+      - broker
+      - schema-registry
+      - connect
+      - prometheus
+      - alertmanager
+    ports:
+      - "9021:9021"
+    volumes:
+      - ./vol/config:/mnt/config
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'broker:29092'
+      CONTROL_CENTER_CONNECT_CONNECT-DEFAULT_CLUSTER: 'connect:8083'
+      CONTROL_CENTER_CONNECT_HEALTHCHECK_ENDPOINT: '/connectors'
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+      CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+      CONTROL_CENTER_PROMETHEUS_ENABLE: true
+      CONTROL_CENTER_PROMETHEUS_URL: http://prometheus:9090
+      CONTROL_CENTER_PROMETHEUS_RULES_FILE: /mnt/config/trigger_rules-generated.yml
+      CONTROL_CENTER_ALERTMANAGER_URL: http://alertmanager:9093
+      CONTROL_CENTER_ALERTMANAGER_CONFIG_FILE: /mnt/config/alertmanager-generated.yml
+      PORT: 9021
+
+  # ------------------------------------------------------------------ Source: SQL Server 2019
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    platform: linux/amd64          # no native arm64 image (emulated on Apple Silicon)
+    container_name: mssql
+    hostname: mssql
+    ports:
+      - "1433:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Password!123"
+      MSSQL_PID: Developer         # CDC needs Developer/Standard/Enterprise
+      MSSQL_AGENT_ENABLED: "true"  # CDC capture/cleanup jobs run in SQL Server Agent
+    volumes:
+      - mssql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+
+  # Creates schema + enables CDC, seeds 100 rows/table, then 1 change every 10s per stream
+  data-generator:
+    build: ./data-generator
+    container_name: data-generator
+    depends_on:
+      mssql:
+        condition: service_healthy
+    environment:
+      MSSQL_HOST: mssql
+      MSSQL_PASSWORD: "Password!123"
+      MSSQL_DATABASE: demo_db
+      ROWS_PER_TABLE: 100
+      # seconds between changes (override: OPS_INTERVAL_SECONDS=1 ./start.sh)
+      OPS_INTERVAL_SECONDS: ${OPS_INTERVAL_SECONDS:-10}      # random business table
+      SENSOR_INTERVAL_SECONDS: ${SENSOR_INTERVAL_SECONDS:-10}  # data_sensors
+    restart: on-failure
+
+  # ------------------------------------------------------------------ Sink 1: PostgreSQL
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    hostname: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d demo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ------------------------------------------------------------------ Sink 2: IBM Db2
+  db2:
+    image: icr.io/db2_community/db2:latest
+    platform: linux/amd64
+    container_name: db2
+    hostname: db2
+    privileged: true
+    ports:
+      - "50000:50000"
+    environment:
+      LICENSE: accept
+      DB2INSTANCE: db2inst1
+      DB2INST1_PASSWORD: db2inst1-pwd
+      DBNAME: demo
+      BLU: "false"
+      ENABLE_ORACLE_COMPATIBILITY: "false"
+      UPDATEAVAIL: "NO"
+      TO_CREATE_SAMPLEDB: "false"
+      REPODB: "false"
+      IS_OSXFS: "true"
+      PERSISTENT_HOME: "true"
+      HADR_ENABLED: "false"
+    volumes:
+      - db2-data:/database
+      # The image's setup runs `su - db2inst1 -c db2start` and needs a login shell (loads
+      # ~/sqllib/db2profile). On some Docker VMs (e.g. Colima) `su -` doesn't give one, so
+      # "db2: command not found" and the DB is never created. These wrappers load the
+      # profile themselves and exec the real binary.
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2set:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2stop:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2start:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2pd:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2updv121:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2ts:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2cfimp:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2cfexp:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2sampl:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2inidb:ro
+      - ./db2-init/db2-wrapper:/usr/local/bin/db2gcf:ro
+      # only executables belong in /var/custom (the image runs every file there)
+      - ./db2-init/init-db.sh:/var/custom/init-db.sh:ro
+      - ./db2-init/schema.sql:/opt/schema/schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "su - db2inst1 -c 'db2 connect to demo > /dev/null 2>&1 && db2 connect reset > /dev/null 2>&1'"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 600s
+
+  # ------------------------------------------------------------------ Web SQL client for all 3 databases
+  cloudbeaver:
+    image: dbeaver/cloudbeaver:${CLOUDBEAVER_VERSION:-latest}
+    container_name: cloudbeaver
+    hostname: cloudbeaver
+    ports:
+      - "8978:8978"
+    environment:
+      CB_SERVER_NAME: "Replication demo"
+      CB_ADMIN_NAME: cbadmin
+      CB_ADMIN_PASSWORD: Admin123
+    volumes:
+      - cloudbeaver-data:/opt/cloudbeaver/workspace
+      # pre-configured connections (applied on first start with an empty workspace)
+      - ./cloudbeaver/initial-data-sources.conf:/opt/cloudbeaver/conf/initial-data-sources.conf:ro
+
+volumes:
+  cloudbeaver-data:
+  mssql-data:
+  postgres-data:
+  db2-data:

@@ -1,0 +1,8 @@
+#!/bin/bash
+# Loads the Db2 instance profile, then runs the real binary of the same name.
+profile=/database/config/db2inst1/sqllib/db2profile
+[ -f "$profile" ] || { echo "$(basename "$0"): Db2 instance not created yet" >&2; exit 127; }
+. "$profile"
+real=$(type -aP "$(basename "$0")" | grep -v '^/usr/local/bin/' | head -1)
+[ -n "$real" ] || { echo "$(basename "$0"): not found" >&2; exit 127; }
+exec "$real" "$@"
