@@ -28,69 +28,7 @@ That gives teams a common foundation for keeping operational stores aligned toda
 **Demo scope:** the generator changes data across 20 tables so the end-to-end behavior is easy to inspect. This demonstrates the configuration pattern, including heterogeneous keys; it is not a 600-table throughput or sizing benchmark. Validate performance, task/partition sizing, database capacity and schema-management procedures with a workload representative of your environment.
 
 ## Architecture
-
-```mermaid
-flowchart LR
-    %% Data producer and source database
-    GEN["Python data generator<br/>19 business tables + data_sensors"]
-    SQL[("SQL Server 2019<br/>CDC enabled")]
-
-    %% Everything inside this boundary runs on Confluent Platform
-    subgraph CP["CONFLUENT PLATFORM"]
-        direction LR
-
-        subgraph CONNECT_SOURCE["Kafka Connect · Source"]
-            direction TB
-            SRC["Debezium SQL Server CDC<br/>Source Connector"]
-        end
-
-        subgraph KAFKA["APACHE KAFKA"]
-            direction TB
-            TOPICS["<b>20 compacted topics · Avro</b><br/><br/>countries · departments<br/>customers · addresses<br/>product_categories · suppliers<br/>products · warehouses<br/>inventory · orders<br/>order_items · payments<br/>shipments · employees<br/>timesheets · invoices<br/>support_tickets · product_reviews<br/>vehicles · data_sensors"]
-        end
-
-        subgraph CONNECT_SINKS["Kafka Connect · Sinks"]
-            direction TB
-            PGSINK["PostgreSQL JDBC<br/>Sink Connector"]
-            DB2SINK["IBM Db2 JDBC<br/>Sink Connector"]
-        end
-
-        SR["Schema Registry<br/>Avro key/value schemas"]
-
-        SRC -->|Publish changes| TOPICS
-        TOPICS -->|Consume changes| PGSINK
-        TOPICS -->|Consume changes| DB2SINK
-        SRC -.->|Schemas| SR
-        PGSINK -.->|Schemas| SR
-        DB2SINK -.->|Schemas| SR
-    end
-
-    PG[("PostgreSQL")]
-    DB2[("IBM Db2")]
-
-    GEN -->|Inserts / updates / deletes| SQL
-    SQL -->|CDC| SRC
-    PGSINK -->|Upsert / delete| PG
-    DB2SINK -->|Upsert / delete| DB2
-
-    %% Visual hierarchy
-    classDef producer fill:#F1F5F9,stroke:#64748B,color:#0F172A,stroke-width:1.5px;
-    classDef database fill:#E0F2FE,stroke:#0284C7,color:#0C4A6E,stroke-width:2px;
-    classDef connector fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:1.5px;
-    classDef kafka fill:#FFF7ED,stroke:#EA580C,color:#7C2D12,stroke-width:2px;
-    classDef registry fill:#ECFDF5,stroke:#059669,color:#065F46,stroke-width:1.5px;
-
-    class GEN producer;
-    class SQL,PG,DB2 database;
-    class SRC,PGSINK,DB2SINK connector;
-    class TOPICS kafka;
-    class SR registry;
-
-    style CP fill:#F8FAFC,stroke:#334155,stroke-width:3px,color:#0F172A
-    style CONNECT_SOURCE fill:#F5F3FF,stroke:#A78BFA,stroke-width:1px,color:#4C1D95
-    style CONNECT_SINKS fill:#F5F3FF,stroke:#A78BFA,stroke-width:1px,color:#4C1D95
-    style KAFKA fill:#FFFBEB,stroke:#F59E0B,stroke-width:2px,color:#92400E
-```
+![Demo Diagram](docs/demo_diagram.png)
 
 * **20 tables:** 19 business tables with deliberately different primary keys (identity INT/BIGINT/SMALLINT, CHAR/VARCHAR natural keys, UUID strings, and composite keys including a DATE part), plus the small live-demo table [`data_sensors`](#easy-to-watch-table-data_sensors). See [Replicated tables](#replicated-tables).
 * **Data generator:** creates the schema, enables CDC, seeds **100 rows per business table** (10 for `data_sensors`), then performs **one insert, update or delete every 10 seconds** on a random business table. Deletes are restricted to leaf tables so foreign-key constraints are not violated at the source. A second stream changes `data_sensors` every 10 seconds. Both intervals are configurable (see below).

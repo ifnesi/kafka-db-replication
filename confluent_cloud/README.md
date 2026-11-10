@@ -2,34 +2,9 @@
 
 Same demo as the [local-only version](../README.md) (same 20 tables, data generator, connectors and databases), but the Kafka cluster and Schema Registry are provisioned in Confluent Cloud by Terraform. The data plane (Python generator, three databases and self-managed Kafka Connect worker with its connectors) runs locally in Docker:
 
-```mermaid
-flowchart LR
- subgraph LOCAL["Your machine (Docker)"]
- GEN["Python data generator<br/>100 rows/table, then 1 change/10s<br/>+ data_sensors: 10 rows"]
- MSSQL[("SQL Server 2019<br/>CDC enabled")]
- SRC["Self-managed Kafka Connect<br/>Debezium SQL Server CDC source connector"]
- PGSINK["Self-managed Kafka Connect<br/>JDBC sink connector"]
- DB2SINK["Self-managed Kafka Connect<br/>JDBC sink connector"]
- PG[("PostgreSQL")]
- DB2[("IBM Db2")]
+![Demo Diagram](docs/cc_demo_diagram.png)
 
- GEN --> MSSQL
- MSSQL -->|"transaction log (CDC)"| SRC
- PGSINK --> PG
- DB2SINK --> DB2
- end
-
- subgraph CLOUD["Confluent Cloud (provisioned by Terraform, AWS Frankfurt)"]
- direction TB
- TOPICS[["Kafka Standard cluster<br/>20 compacted topics, one per table (Avro)"]]
- SR["Schema Registry (Stream Governance Essentials)"]
- TOPICS <-.-> SR
- end
-
- SRC -->|"SASL_SSL"| TOPICS
- TOPICS -->|"SASL_SSL"| PGSINK
- TOPICS -->|"SASL_SSL"| DB2SINK
-```
+The two optional integrations on the right of the diagram are covered in [Query topics with Lightning Tables and DBeaver](#query-topics-with-lightning-tables-and-dbeaver) and [Confluent MCP server with Claude](#confluent-mcp-server-with-claude): both authenticate with a Global API key and reach Confluent Cloud directly over HTTPS, not through the local Docker stack.
 
 The demo reuses the parent folder’s data generator, database initialization scripts, Kafka Connect image, CloudBeaver setup and verification script. This folder adds the Confluent Cloud configuration and Cloud-aware orchestration:
 
@@ -199,11 +174,7 @@ Notes: Db2 table and column names are lowercase and **quoted** (`"orders"`, `"or
 
 [Lightning Tables](https://docs.confluent.io/cloud/current/lightning-tables/overview.html) turn Kafka topics into SQL tables that you can query with a plain `SELECT`, from any JDBC client, without a connector or a Flink compute pool. Here DBeaver on your machine queries the replicated topics straight from Confluent Cloud, with the new [Confluent JDBC driver](https://docs.confluent.io/cloud/current/lightning-tables/query/jdbc.html):
 
-```mermaid
-flowchart LR
- DBV["DBeaver (your machine)<br/>Confluent JDBC driver"] -->|"HTTPS, Global API key"| LT["Lightning Tables<br/>sql.eu-central-1.aws.confluent.cloud"]
- LT --> TOPICS[["Kafka topics<br/>data_sensors, customers, orders, products"]]
-```
+![Lightning Tables and DBeaver](docs/lightning_tables_dbeaver.png)
 
 Requirements: an AWS cluster in a Lightning Tables region (this demo uses `eu-central-1`), a schema on the topic (Debezium has registered Avro schemas) and the Global API key from [Prerequisites](#prerequisites). The topics are compacted, so each table is in *upsert* mode and shows the latest row per key. The driver is read-only (`SELECT` only).
 
