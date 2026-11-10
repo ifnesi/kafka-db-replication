@@ -15,8 +15,23 @@ dc() {
   if [ -f "$ENV_FILE" ]; then $DC --env-file "$ENV_FILE" "$@"; else $DC "$@"; fi
 }
 
+# Optional confluent_cloud/.env (copied from .env_example): fills in variables that are not already
+# exported, so a value exported in the shell wins over the file.
+load_dotenv() {
+  local f="$CC_DIR/.env" line k v
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    k="${line%%=*}"; v="${line#*=}"
+    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+    [ -n "$k" ] && [ -z "${!k}" ] && export "$k=$v"
+  done < "$f"
+  return 0
+}
+load_dotenv
+
 # ---------------------------------------------------------------------------
-# Confluent Cloud credentials: taken from the environment or prompted (never stored on disk)
+# Confluent Cloud credentials: taken from the environment or .env or prompted
 # ---------------------------------------------------------------------------
 require_cc_credentials() {
   if [ -z "$CONFLUENT_CLOUD_API_KEY" ] || [ -z "$CONFLUENT_CLOUD_API_SECRET" ]; then

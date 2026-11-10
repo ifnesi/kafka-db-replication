@@ -39,6 +39,8 @@ The demo reuses the parent folder’s data generator, database initialization sc
 | `docker-compose.yml` | Databases, data generator, CloudBeaver and a self-managed Kafka Connect worker connected to Confluent Cloud (no local Kafka broker, Schema Registry or Control Center) |
 | `connectors/` | The same three connector configurations, with Confluent Cloud credentials injected from the worker environment (`${env:CC_...}`), so the files contain no secrets |
 | `start.sh`, `stop.sh`, `deploy-connectors.sh`, `verify.sh` | Cloud-aware versions of the local scripts |
+| `.env_example` | Template for the credentials (Terraform, Lightning Tables, MCP): copy it to `.env` |
+| `lightning-tables.sh` | Enables Lightning Tables on a few topics, downloads the JDBC driver and writes the DBeaver connection file |
 | `scripts/` | Helpers (`gen_connectors.py` regenerates `connectors/`) |
 
 ## What Terraform creates
@@ -66,19 +68,34 @@ TF_VAR_cc_cloud_region=eu-west-1 ./start.sh
 * A **Confluent Cloud account** and a **Cloud API key scoped for Cloud resource management** (not a Kafka cluster or Schema Registry API key). Create it from Confluent Cloud’s **API keys** page by choosing **Add API key** and the **Cloud resource management** scope. The key owner needs sufficient permissions to create the resources managed by Terraform; for this demo, use an account with the required organization-level permissions. See Confluent’s [Manage API Keys in Confluent Cloud documentation](https://docs.confluent.io/cloud/current/security/authenticate/workload-identities/service-accounts/api-keys/manage-api-keys.html) for the current steps and role requirements.
 * Docker, or **Colima** on macOS (`brew install colima`): `start.sh` starts it and `stop.sh` stops it (see the [main README](../README.md#requirements--caveats) for sizing and the Db2 note).
 * **Terraform is optional.** If `terraform` is not installed, the scripts use the official `hashicorp/terraform` Docker image instead (force this with `TF_USE_DOCKER=1`). The repository must live under your home folder for this option because Colima shares only `$HOME` with the VM.
+* *(Optional, for [Lightning Tables](#query-topics-with-lightning-tables-and-dbeaver) and the [MCP server](#confluent-mcp-server-with-claude))* a **Global API key** (organization-wide). Create it from **API keys** > **Add API key** > **My account** > **Global access**. A Cloud resource management key or a cluster-scoped key is rejected with `HTTP 401`.
+* *(Optional, for Lightning Tables)* [DBeaver](https://dbeaver.io/download/) on the machine (Java 17 or later; DBeaver's bundled JRE is enough).
 * Internet access for Confluent Cloud, Maven (Db2 JDBC driver) and container images.
 
 ## Run
 
+Put your credentials in a `.env` file first, so nothing has to be typed or exported:
+
 ```bash
 cd confluent_cloud
-./start.sh # prompts for CONFLUENT_CLOUD_API_KEY / CONFLUENT_CLOUD_API_SECRET, provisions the Cloud resources, then starts the local databases, generator and Kafka Connect worker
+cp .env_example .env # then edit .env: fill in the values before running anything else
+```
+
+| Variable | Used by | Key type |
+|---|---|---|
+| `CONFLUENT_CLOUD_API_KEY` / `CONFLUENT_CLOUD_API_SECRET` | `start.sh`, `stop.sh` (Terraform) and `lightning-tables.sh` (enable topics) | Cloud resource management |
+| `CONFLUENT_GLOBAL_API_KEY` / `CONFLUENT_GLOBAL_API_SECRET` | Lightning Tables JDBC driver and the Confluent MCP server | Global access |
+
+`.env` is git-ignored. Variables already exported in your shell take precedence over the file, and the scripts prompt for any Terraform key that is still missing.
+
+```bash
+./start.sh # reads .env (or prompts for CONFLUENT_CLOUD_API_KEY / CONFLUENT_CLOUD_API_SECRET), provisions the Cloud resources, then starts the local databases, generator and Kafka Connect worker
 ./deploy-connectors.sh # SQL Server CDC source + PostgreSQL sink + Db2 sink (or: source | sinks)
 ./verify.sh # per-table row counts: SQL Server vs PostgreSQL vs Db2
 ./stop.sh # removes the local stack and asks whether to destroy the Cloud resources too
 ```
 
-* Credentials are read from `CONFLUENT_CLOUD_API_KEY` / `CONFLUENT_CLOUD_API_SECRET` if already exported; otherwise `start.sh` prompts for them (the secret is not echoed). They are never written to disk. Terraform needs them again if you choose to destroy the Cloud resources with `./stop.sh`.
+* Credentials are read from `.env` or the environment; otherwise `start.sh` prompts for the Terraform key (the secret is not echoed). The scripts never write them anywhere else. Terraform needs them again if you choose to destroy the Cloud resources with `./stop.sh`.
 * At the end, `start.sh` prints the **Confluent Cloud console link** for the new Kafka cluster, the Schema Registry endpoint and the local URLs. CloudBeaver (`http://localhost:8978`) has the three database connections preloaded, as in the local demo.
 * Non-interactive use: `ASSUME_YES=1 ./start.sh`, `DESTROY_CLOUD=1 ./stop.sh`, `KEEP_COLIMA=1 ./stop.sh`.
 * `SKIP_TERRAFORM=1 ./start.sh` reuses the already deployed environment (`cloud.env`) without running Terraform.
@@ -178,6 +195,83 @@ docker exec db2 su - db2inst1 -c 'db2 connect to demo > /dev/null && db2 "select
 
 Notes: Db2 table and column names are lowercase and **quoted** (`"orders"`, `"order_id"`). To see the changes arrive faster, shorten the generator intervals, for example `OPS_INTERVAL_SECONDS=1 SENSOR_INTERVAL_SECONDS=1 ./start.sh`, or on a running stack `OPS_INTERVAL_SECONDS=2 SENSOR_INTERVAL_SECONDS=2 docker compose up -d data-generator` (use `docker-compose` if you have the standalone binary).
 
+## Query topics with Lightning Tables and DBeaver
+
+[Lightning Tables](https://docs.confluent.io/cloud/current/lightning-tables/overview.html) turn Kafka topics into SQL tables that you can query with a plain `SELECT`, from any JDBC client, without a connector or a Flink compute pool. Here DBeaver on your machine queries the replicated topics straight from Confluent Cloud, with the new [Confluent JDBC driver](https://docs.confluent.io/cloud/current/lightning-tables/query/jdbc.html):
+
+```mermaid
+flowchart LR
+ DBV["DBeaver (your machine)<br/>Confluent JDBC driver"] -->|"HTTPS, Global API key"| LT["Lightning Tables<br/>sql.eu-central-1.aws.confluent.cloud"]
+ LT --> TOPICS[["Kafka topics<br/>data_sensors, customers, orders, products"]]
+```
+
+Requirements: an AWS cluster in a Lightning Tables region (this demo uses `eu-central-1`), a schema on the topic (Debezium has registered Avro schemas) and the Global API key from [Prerequisites](#prerequisites). The topics are compacted, so each table is in *upsert* mode and shows the latest row per key. The driver is read-only (`SELECT` only).
+
+**1. Prepare** (after `./start.sh` and `./deploy-connectors.sh`, with `.env` filled in):
+
+```bash
+./lightning-tables.sh # enables data_sensors, customers, orders and products
+TOPICS="orders payments" ./lightning-tables.sh # or pick your own topics
+```
+
+It enables Lightning Tables on the topics, downloads `confluent-jdbc-1.0.0.jar` into `drivers/`, writes `lightning-jdbc.properties` (permissions 600, git-ignored, holds the Global API key) and prints the DBeaver settings below with your absolute paths. Enabling takes several minutes: the status is under **Topics** > **Lightning Tables** in the console. `./lightning-tables.sh disable` turns it off again. The topics are recreated on every `./start.sh`, so run the script again after a restart.
+
+**2. Register the driver in DBeaver:** **Database** > **Driver Manager** > **New**:
+
+| Field | Value |
+|---|---|
+| Driver Name | `Confluent Lightning Tables` |
+| Class Name | `io.confluent.jdbc.avatica.ConfluentJdbcDriver` |
+| URL Template | `jdbc:confluent:lightning://?propertiesFile=/absolute/path/to/confluent_cloud/lightning-jdbc.properties` |
+| Libraries | **Add File** > `confluent_cloud/drivers/confluent-jdbc-1.0.0.jar` |
+
+Use a real absolute path in the URL (the script prints it): DBeaver reads `<...>` or `{...}` in a template as a placeholder and fails with *named capturing group is missing trailing '>'*. If it still complains, create the connection with **Connect by: URL** and paste the URL there.
+
+**3. Create the connection** with that driver. Leave **Username** and **Password** empty: the endpoint, environment ID, cluster ID and Global API key all come from the properties file. Without a properties file, use the URL `jdbc:confluent:lightning://sql.eu-central-1.aws.confluent.cloud?environment-id=<env_id>&lkc-id=<lkc_id>` with the Global API key as the username and the secret as the password (IDs are in `cloud.env`).
+
+**4. Query:** the navigator shows the environment ID as the catalog, the cluster ID as the schema and one table per enabled topic. Open an SQL editor and run:
+
+```sql
+SELECT * FROM data_sensors LIMIT 10;
+SELECT customer_tier, COUNT(*) AS customers FROM customers GROUP BY customer_tier;
+SELECT * FROM orders LIMIT 20;
+```
+
+Names with special characters need backticks (`` `my-topic` ``). Rerun `data_sensors` to see the data change every 10 seconds. Large results run asynchronously and fail instead of returning partial data, so add a `LIMIT` or a filter.
+
+| Error | Cause |
+|---|---|
+| `HTTP 401 ... not a key that authenticates a whole organization` | The key is not a Global API key. Create one and update `.env` and `lightning-jdbc.properties` (rerun `./lightning-tables.sh`). |
+| `HTTP 403` | The key's owner lacks read permission on the topic (for example ResourceOwner). |
+| Table not found | Lightning Tables is still being enabled, or the topic was not enabled. |
+
+## Confluent MCP server with Claude
+
+The [Confluent Cloud managed MCP server](https://docs.confluent.io/cloud/current/ai/ai-tools/managed-mcp-server.html) is hosted by Confluent: nothing runs locally. It lets Claude inspect the environment and clusters, check and restart connectors and query metrics. The regional server also reads topics and schemas and runs Flink SQL. Use the same Global API key (`CONFLUENT_GLOBAL_API_KEY` in `.env`), as an HTTP Basic header.
+
+**Claude Code** (run from `confluent_cloud/`; the header value is built from `.env` so the secret is not typed):
+
+```bash
+set -a; source .env; set +a
+claude mcp add --transport http confluent-mcp-global https://api.confluent.cloud/mcp/v1 \
+  --header "Authorization: Basic $(printf '%s:%s' "$CONFLUENT_GLOBAL_API_KEY" "$CONFLUENT_GLOBAL_API_SECRET" | base64)"
+claude mcp list # confluent-mcp-global should be connected
+```
+
+The global server accepts Global and Cloud API keys. For topics, schemas, sample messages and Flink SQL, add the regional server (needs your organization ID, shown in the console under **Organization settings**; Global and Flink API keys work there):
+
+```bash
+claude mcp add --transport http confluent-mcp-regional \
+  "https://mcp.eu-central-1.aws.confluent.cloud/mcp/v1/organizations/<org_id>" \
+  --header "Authorization: Basic $(printf '%s:%s' "$CONFLUENT_GLOBAL_API_KEY" "$CONFLUENT_GLOBAL_API_SECRET" | base64)"
+```
+
+Without an API key you can sign in with your Confluent account instead: `claude mcp add --transport http --client-id claude-cli confluent-mcp-global https://api.confluent.cloud/mcp/v1`, restart Claude Code, run `/mcp`, choose the server and **Authenticate**. For **Claude Desktop** or **claude.ai** use the same URL and header (or OAuth client ID `claude-desktop` / `claude-ai`) in a custom connector.
+
+Then ask Claude things like *"List the environments and clusters in my Confluent Cloud account"*, *"Which topics does cluster `lkc-...` have and what is the schema of `data_sensors`?"* or *"Show me the last messages of `data_sensors`"* (regional server). The docs do not list Lightning Tables query tools for the MCP server, so query those through DBeaver.
+
+The header is stored in Claude's configuration (`~/.claude.json`) in clear text. Remove the servers when done (`claude mcp remove confluent-mcp-global`). `restart_connector`, `update_connector_config`, `create_flink_statement` and `delete_flink_statement` change resources: do not auto-approve them.
+
 ## Destroy it (and cost)
 
 A Standard cluster and the Stream Governance package are **billed while they exist**, so destroy the Confluent Cloud resources when you are done:
@@ -197,7 +291,7 @@ Terraform state is kept locally in `terraform/terraform.tfstate`. If you lose it
 * The Kafka Connect worker (`docker-compose.yml`) uses `SASL_SSL` + `PLAIN` with the `client` service account’s Kafka API key for the worker and the producers, consumers and admin client it creates. Avro converters authenticate to Schema Registry with Schema Registry API key/secret using `USER_INFO`.
 * Connector configurations reference credentials as `${env:CC_KAFKA_API_KEY}`, `${env:CC_SR_API_SECRET}`, etc. Kafka Connect’s `EnvVarConfigProvider` resolves them from the worker environment (populated from `cloud.env`), so credentials do not appear in the JSON files or Kafka Connect REST API output. Debezium’s schema history client uses the same settings under `schema.history.internal.producer|consumer|admin.*`.
 * Kafka Connect internal topics, the Debezium schema history topic and the table topics are created by Terraform. Confluent Cloud sets the replication factor to 3, so the connectors do not need topic-creation permissions at runtime.
-* `cloud.env` (API keys, Kafka and Schema Registry endpoints) and the Terraform state contain sensitive values; both are git-ignored.
+* `cloud.env` (API keys, Kafka and Schema Registry endpoints), `.env`, `lightning-jdbc.properties` and the Terraform state contain sensitive values; all are git-ignored.
 
 ## Notes
 
@@ -211,6 +305,8 @@ Terraform state is kept locally in `terraform/terraform.tfstate`. If you lose it
 * [Microsoft SQL Server CDC Source V2 (Debezium) for Confluent Cloud](https://docs.confluent.io/cloud/current/connectors/cc-microsoft-sql-server-source-cdc-v2-debezium/cc-microsoft-sql-server-source-cdc-v2-debezium.html)
 * [PostgreSQL Sink for Confluent Cloud](https://docs.confluent.io/cloud/current/connectors/cc-postgresql-sink.html)
 * [Manage API Keys in Confluent Cloud](https://docs.confluent.io/cloud/current/security/authenticate/workload-identities/service-accounts/api-keys/manage-api-keys.html)
+* [Lightning Tables overview](https://docs.confluent.io/cloud/current/lightning-tables/overview.html), [manage](https://docs.confluent.io/cloud/current/lightning-tables/manage.html) and [query with JDBC](https://docs.confluent.io/cloud/current/lightning-tables/query/jdbc.html)
+* [Confluent Cloud managed MCP server](https://docs.confluent.io/cloud/current/ai/ai-tools/managed-mcp-server.html)
 
 ## Confluent Platform references
 

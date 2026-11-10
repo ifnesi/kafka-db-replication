@@ -6,3 +6,6 @@ terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfvars
 terraform/crash.log
+lightning-jdbc.properties
+drivers/
+.env
