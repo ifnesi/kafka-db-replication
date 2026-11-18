@@ -3,7 +3,7 @@
 # DBeaver needs to query them over JDBC: the driver JAR and a connection properties file.
 #
 #   ./lightning-tables.sh                 enable the default topics, download driver, write properties
-#   TOPICS="orders customers" ./lightning-tables.sh
+#   TOPICS="cdc.orders cdc.customers" ./lightning-tables.sh
 #   ./lightning-tables.sh disable         disable Lightning Tables on those topics again
 #
 # Env vars (prompted for when missing):
@@ -16,7 +16,7 @@ cd "$(dirname "$0")"
 source cloud.env
 source scripts/common.sh   # loads .env
 
-TOPICS=${TOPICS:-"data_sensors customers orders products"}
+TOPICS=${TOPICS:-"cdc.data_sensors cdc.customers cdc.orders cdc.products"}
 CLOUD=AWS
 REGION=${CC_SR_REGION:-eu-central-1}
 DRIVER_VERSION=1.0.0
@@ -73,5 +73,5 @@ DBeaver: Database > Driver Manager > New
   Library      : $PWD/$DRIVER
   URL template : jdbc:confluent:lightning://?propertiesFile=$PWD/$PROPS
 Then New connection with that driver (leave user/password empty) and run, e.g.:
-  SELECT * FROM data_sensors LIMIT 10;
+  SELECT * FROM `cdc.data_sensors` LIMIT 10;
 EOT

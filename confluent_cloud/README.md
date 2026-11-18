@@ -1,8 +1,10 @@
 # Database replication with Confluent Cloud: SQL Server → Kafka + Schema Registry → PostgreSQL + IBM Db2
 
-Same demo as the [local-only version](../README.md) (same 20 tables, data generator, connectors and databases), but the Kafka cluster and Schema Registry are provisioned in Confluent Cloud by Terraform. The data plane (Python generator, three databases and self-managed Kafka Connect worker with its connectors) runs locally in Docker:
+Same demo as the [local-only version](../README.md) (same 20 tables, data generator, connectors and databases), but the Kafka cluster and Schema Registry are provisioned in Confluent Cloud by Terraform. The data plane (Python generator, three databases and two self-managed Kafka Connect clusters, one for the CDC source and one for the sinks) runs locally in Docker:
 
 ![Demo Diagram](docs/cc_demo_diagram.png)
+
+The diagram shows a single Kafka Connect box; in this version it is split into two clusters: `connect-source` (the Debezium CDC source) and `connect-sink` (the PostgreSQL and Db2 sinks), see [Distributing the self-managed connectors](#distributing-the-self-managed-connectors-across-two-or-more-vms).
 
 The two optional integrations on the right of the diagram are covered in [Query topics with Lightning Tables and DBeaver](#query-topics-with-lightning-tables-and-dbeaver) and [Confluent MCP server with Claude](#confluent-mcp-server-with-claude): both authenticate with a Global API key and reach Confluent Cloud directly over HTTPS, not through the local Docker stack.
 
@@ -11,7 +13,7 @@ The demo reuses the parent folder’s data generator, database initialization sc
 | File | What |
 |---|---|
 | `terraform/` | Confluent Cloud environment, Kafka cluster, Schema Registry, service accounts, RBAC role bindings, API keys and topics |
-| `docker-compose.yml` | Databases, data generator, CloudBeaver and a self-managed Kafka Connect worker connected to Confluent Cloud (no local Kafka broker, Schema Registry or Control Center) |
+| `docker-compose.yml` | Databases, data generator, CloudBeaver and two self-managed Kafka Connect clusters (`connect-source` :8083, `connect-sink` :8084) connected to Confluent Cloud (no local Kafka broker, Schema Registry or Control Center) |
 | `connectors/` | The same three connector configurations, with Confluent Cloud credentials injected from the worker environment (`${env:CC_...}`), so the files contain no secrets |
 | `start.sh`, `stop.sh`, `deploy-connectors.sh`, `verify.sh` | Cloud-aware versions of the local scripts |
 | `.env_example` | Template for the credentials (Terraform, Lightning Tables, MCP): copy it to `.env` |
@@ -25,10 +27,41 @@ The demo reuses the parent folder’s data generator, database initialization sc
 | Environment | `db-replication-xxxxxx` (random 6-character suffix), with Stream Governance Essentials |
 | Kafka cluster | Standard cluster, AWS Frankfurt (`eu-central-1`), single zone |
 | Schema Registry | Stream Governance Essentials Schema Registry, provisioned for the environment; Terraform reads back its endpoint |
-| Service accounts | `app-manager` (creates topics), `sr` (Schema Registry access), `client` (Kafka Connect worker and connectors), with role bindings and API keys |
-| Topics | One compacted Kafka topic per table (20), Kafka Connect internal topics and the Debezium schema history topic |
+| Service accounts | Least privilege, one identity per component, each with its own Kafka and Schema Registry API key (see the table below). `app-manager` is used only by Terraform to create topics |
+| Topics | One compacted, single-partition Kafka topic per table (20, named `cdc.<table>`), Kafka Connect internal topics (3 per Connect cluster), the `_confluent-command` license topic and the Debezium schema history topic |
 
-The environment as it appears in the Confluent Cloud console after `./start.sh`: the `cc-demo-main` Standard cluster running on AWS `eu-central-1`, 24 topics and the Essentials governance package. It shows 0 connectors because they run self-managed in your Docker, not in Confluent Cloud.
+### Service accounts and RBAC per connector
+
+One service account per connector, each with its own **Kafka API key** and **Schema Registry API key** (`terraform/service_accounts.tf`). Every row is one role binding.
+
+**Names carry the environment's suffix.** Terraform generates one random 6-character suffix per deployment and appends it to the environment, the service accounts and the API keys, so all resources of one run share it. For an environment called `db-replication-1a2b3c`, the accounts in the table below appear in the Confluent Cloud console (**Accounts & access**) as `source-1a2b3c`, `pgsink-1a2b3c`, `db2sink-1a2b3c`, `connect-worker-1a2b3c` and `app-manager-1a2b3c`, and the API keys as `<account>-kafka-key-1a2b3c` / `<account>-sr-key-1a2b3c`. `xxxxxx` stands for that suffix in the table. This lets several copies of the demo coexist in one organization and tells you which environment an account belongs to.
+
+| Connector (Connect cluster) | Service account | Access | Resource | Resource name | Role |
+|---|---|---|---|---|---|
+| `mssql-cdc-source` (`connect-source`) | `source-xxxxxx` | **read/write** | Kafka topic | `cdc.*` | `DeveloperWrite` |
+| | | read/write | Kafka topic | `mssql.schema-history` | `ResourceOwner` |
+| | | **write** | Schema Registry subject | `cdc.*` | `DeveloperWrite` |
+| `postgres-sink` (`connect-sink`) | `pgsink-xxxxxx` | **read only** | Kafka topic | `cdc.*` | `DeveloperRead` |
+| | | read only | Kafka consumer group | `connect-postgres-sink` | `DeveloperRead` |
+| | | **read only** | Schema Registry subject | `cdc.*` | `DeveloperRead` |
+| `db2-sink` (`connect-sink`) | `db2sink-xxxxxx` | **read only** | Kafka topic | `cdc.*` | `DeveloperRead` |
+| | | read only | Kafka consumer group | `connect-db2-sink` | `DeveloperRead` |
+| | | **read only** | Schema Registry subject | `cdc.*` | `DeveloperRead` |
+| both Connect workers (no connector) | `connect-worker-xxxxxx` | internal only | Kafka topic | `docker-connect-*` | `ResourceOwner` |
+| | | internal only | Kafka topic | `_confluent-command` (Connect license) | `ResourceOwner` |
+| | | internal only | Kafka consumer group | `db-replication-connect-*` | `ResourceOwner` |
+| Terraform (provisioning only) | `app-manager-xxxxxx` | admin | Environment | whole environment | `EnvironmentAdmin` |
+
+What this means in practice:
+
+* **Sinks are read only**: they can consume `cdc.*` and read schemas, but cannot produce to any topic or register a schema, and each can only use its own consumer group (so `pgsink` cannot join or commit offsets for the Db2 sink's group).
+* **The source is write only on data**: it can produce to `cdc.*` and register schemas for `cdc.*` subjects, but has no consumer group and cannot read other topics. It owns the Debezium schema history topic, which it must both write and read back.
+* **The worker identity has no access to table data or Schema Registry**: it only manages the Connect internal topics and the worker groups.
+* Because the source and sinks have separate credentials, revoking one (for example a compromised sink key) does not affect the others.
+
+Each connector authenticates with its own account through `producer.override.*` / `consumer.override.*` and its own Avro converter settings (the workers run with `connector.client.config.override.policy=All`). A sink cannot write to a topic or register a schema, and the source cannot consume.
+
+The environment as it appears in the Confluent Cloud console after `./start.sh`: the `cc-demo-main` Standard cluster running on AWS `eu-central-1`, 28 topics and the Essentials governance package. It shows 0 connectors because they run self-managed in your Docker, not in Confluent Cloud.
 
 ![Confluent Cloud environment created by Terraform](docs/confluent_cloud-environment.png)
 
@@ -64,9 +97,9 @@ cp .env_example .env # then edit .env: fill in the values before running anythin
 `.env` is git-ignored. Variables already exported in your shell take precedence over the file, and the scripts prompt for any Terraform key that is still missing.
 
 ```bash
-./start.sh # reads .env (or prompts for CONFLUENT_CLOUD_API_KEY / CONFLUENT_CLOUD_API_SECRET), provisions the Cloud resources, then starts the local databases, generator and Kafka Connect worker
+./start.sh # reads .env (or prompts for CONFLUENT_CLOUD_API_KEY / CONFLUENT_CLOUD_API_SECRET), provisions the Cloud resources, then starts the local databases, generator and the two Kafka Connect clusters
 ./deploy-connectors.sh # SQL Server CDC source + PostgreSQL sink + Db2 sink (or: source | sinks)
-./verify.sh # per-table row counts: SQL Server vs PostgreSQL vs Db2
+./verify.sh # live view of data_sensors on SQL Server, PostgreSQL and Db2, refreshed every 10s (Ctrl+C to stop); ./verify.sh counts = per-table row counts
 ./stop.sh # removes the local stack and asks whether to destroy the Cloud resources too
 ```
 
@@ -83,7 +116,7 @@ Watch the demo in Confluent Cloud (topics, messages with tombstones, schemas and
 
 Once `./start.sh` and `./deploy-connectors.sh` have finished and the connectors show `RUNNING`, check that the three databases follow each other:
 
-**1. Row counts:** `./verify.sh` compares every table in SQL Server, PostgreSQL and Db2. A difference of 1–2 rows just after a change is normal; rerun the check.
+**1. Live check:** `./verify.sh` shows `data_sensors` from SQL Server (source) and, below it, the same table from PostgreSQL and Db2, newest update first, refreshing every 10 seconds (`INTERVAL=5 ./verify.sh` to change it). Each target is flagged *in sync with source* or *DIFFERENT* (a difference right after a change is normal; it clears on the next refresh). For the row counts of all 20 tables, run `./verify.sh counts` once.
 
 **2. CloudBeaver** (`http://localhost:8978`, no login needed): the *Replication demo* folder holds the three connections: **1 - SQL Server (source)**, **2 - PostgreSQL (target)** and **3 - IBM Db2 (target)**. Open an SQL editor on each connection and run the same query:
 
@@ -104,13 +137,13 @@ delete from dbo.addresses where address_id = (select min(address_id) from dbo.ad
 
 **4. Confluent Cloud console** (the link is printed at the end of `start.sh`): open the Kafka cluster and inspect:
 
-* **Topics** → `data_sensors` → **Messages**: the key is the primary key and the value is the row. A delete appears as a record with a `null` value (a tombstone). The **Schema** tab shows the Avro schema registered in Schema Registry.
-* **Connectors**: none are listed in Confluent Cloud because the Kafka Connect worker and connectors run in your Docker environment. **Consumers** shows the `connect-postgres-sink` and `connect-db2-sink` groups and their lag.
+* **Topics** → `cdc.data_sensors` → **Messages**: the key is the primary key and the value is the row. A delete appears as a record with a `null` value (a tombstone). The **Schema** tab shows the Avro schema registered in Schema Registry.
+* **Connectors**: none are listed in Confluent Cloud because the Kafka Connect clusters and connectors run in your Docker environment. **Consumers** shows the `connect-postgres-sink` and `connect-db2-sink` groups and their lag.
 * **Environment** → **Stream Governance**: the Essentials Schema Registry, with one subject pair (`-key` / `-value`) per table.
 
 What these look like once the connectors are running:
 
-**Topics**: the 24 topics Terraform created (20 tables, the Kafka Connect internal topics and the Debezium schema history topic), one partition each.
+**Topics**: the 28 topics Terraform created (20 `cdc.` tables, the six Kafka Connect internal topics, the `_confluent-command` license topic and the Debezium schema history topic), one partition each.
 
 ![Kafka topics in Confluent Cloud](docs/confluent_cloud-kafka_topics.png)
 
@@ -126,7 +159,7 @@ What these look like once the connectors are running:
 
 ![Stream lineage in Confluent Cloud](docs/confluent_cloud-stream_lineage.png)
 
-**5. Kafka Connect from the command line:** `curl -s localhost:8083/connectors?expand=status`, or `docker logs -f connect`.
+**5. Kafka Connect from the command line:** `curl -s localhost:8083/connectors?expand=status` (source cluster) and `curl -s localhost:8084/connectors?expand=status` (sink cluster), or `docker logs -f connect-source` / `docker logs -f connect-sink`.
 
 ## Visualise the data
 
@@ -181,8 +214,8 @@ Requirements: an AWS cluster in a Lightning Tables region (this demo uses `eu-ce
 **1. Prepare** (after `./start.sh` and `./deploy-connectors.sh`, with `.env` filled in):
 
 ```bash
-./lightning-tables.sh # enables data_sensors, customers, orders and products
-TOPICS="orders payments" ./lightning-tables.sh # or pick your own topics
+./lightning-tables.sh # enables cdc.data_sensors, cdc.customers, cdc.orders and cdc.products
+TOPICS="cdc.orders cdc.payments" ./lightning-tables.sh # or pick your own topics
 ```
 
 It enables Lightning Tables on the topics, downloads `confluent-jdbc-1.0.0.jar` into `drivers/`, writes `lightning-jdbc.properties` (permissions 600, git-ignored, holds the Global API key) and prints the DBeaver settings below with your absolute paths. Enabling takes several minutes: the status is under **Topics** > **Lightning Tables** in the console. `./lightning-tables.sh disable` turns it off again. The topics are recreated on every `./start.sh`, so run the script again after a restart.
@@ -203,12 +236,12 @@ Use a real absolute path in the URL (the script prints it): DBeaver reads `<...>
 **4. Query:** the navigator shows the environment ID as the catalog, the cluster ID as the schema and one table per enabled topic. Open an SQL editor and run:
 
 ```sql
-SELECT * FROM data_sensors LIMIT 10;
-SELECT customer_tier, COUNT(*) AS customers FROM customers GROUP BY customer_tier;
-SELECT * FROM orders LIMIT 20;
+SELECT * FROM `cdc.data_sensors` LIMIT 10;
+SELECT customer_tier, COUNT(*) AS customers FROM `cdc.customers` GROUP BY customer_tier;
+SELECT * FROM `cdc.orders` LIMIT 20;
 ```
 
-Names with special characters need backticks (`` `my-topic` ``). Rerun `data_sensors` to see the data change every 10 seconds. Large results run asynchronously and fail instead of returning partial data, so add a `LIMIT` or a filter.
+The topic names contain a dot (`cdc.<table>`), so quote them with backticks (`` `cdc.orders` ``). Rerun `cdc.data_sensors` to see the data change every 10 seconds. Large results run asynchronously and fail instead of returning partial data, so add a `LIMIT` or a filter.
 
 | Error | Cause |
 |---|---|
@@ -239,7 +272,7 @@ claude mcp add --transport http confluent-mcp-regional \
 
 Without an API key you can sign in with your Confluent account instead: `claude mcp add --transport http --client-id claude-cli confluent-mcp-global https://api.confluent.cloud/mcp/v1`, restart Claude Code, run `/mcp`, choose the server and **Authenticate**. For **Claude Desktop** or **claude.ai** use the same URL and header (or OAuth client ID `claude-desktop` / `claude-ai`) in a custom connector.
 
-Then ask Claude things like *"List the environments and clusters in my Confluent Cloud account"*, *"Which topics does cluster `lkc-...` have and what is the schema of `data_sensors`?"* or *"Show me the last messages of `data_sensors`"* (regional server). The docs do not list Lightning Tables query tools for the MCP server, so query those through DBeaver.
+Then ask Claude things like *"List the environments and clusters in my Confluent Cloud account"*, *"Which topics does cluster `lkc-...` have and what is the schema of `cdc.data_sensors`?"* or *"Show me the last messages of `cdc.data_sensors`"* (regional server). The docs do not list Lightning Tables query tools for the MCP server, so query those through DBeaver.
 
 The header is stored in Claude's configuration (`~/.claude.json`) in clear text. Remove the servers when done (`claude mcp remove confluent-mcp-global`). `restart_connector`, `update_connector_config`, `create_flink_statement` and `delete_flink_statement` change resources: do not auto-approve them.
 
@@ -257,19 +290,114 @@ Destroying runs `terraform destroy`: the environment, Kafka cluster, Schema Regi
 
 Terraform state is kept locally in `terraform/terraform.tfstate`. If you lose it without destroying first, delete the `db-replication-xxxxxx` environment in the Confluent Cloud console instead; deleting the environment removes everything inside it.
 
-## How the local Kafka Connect worker connects to Confluent Cloud
+## How the local Kafka Connect clusters connect to Confluent Cloud
 
-* The Kafka Connect worker (`docker-compose.yml`) uses `SASL_SSL` + `PLAIN` with the `client` service account’s Kafka API key for the worker and the producers, consumers and admin client it creates. Avro converters authenticate to Schema Registry with Schema Registry API key/secret using `USER_INFO`.
-* Connector configurations reference credentials as `${env:CC_KAFKA_API_KEY}`, `${env:CC_SR_API_SECRET}`, etc. Kafka Connect’s `EnvVarConfigProvider` resolves them from the worker environment (populated from `cloud.env`), so credentials do not appear in the JSON files or Kafka Connect REST API output. Debezium’s schema history client uses the same settings under `schema.history.internal.producer|consumer|admin.*`.
+* The two Kafka Connect workers (`docker-compose.yml`: `connect-source` for the CDC source, `connect-sink` for the JDBC sinks, each with its own group id and internal topics) use `SASL_SSL` + `PLAIN` with the `connect-worker` account’s Kafka API key for the worker itself. Each connector overrides the producer/consumer credentials with its own service account, and its Avro converters authenticate to Schema Registry with that account’s Schema Registry API key using `USER_INFO`.
+* Connector configurations reference credentials as `${env:CC_SOURCE_KAFKA_API_KEY}`, `${env:CC_PGSINK_SR_API_SECRET}`, etc. Kafka Connect’s `EnvVarConfigProvider` resolves them from the worker environment (populated from `cloud.env`), so credentials do not appear in the JSON files or Kafka Connect REST API output. Debezium’s schema history client uses the same settings under `schema.history.internal.producer|consumer|admin.*`.
+* The sink connectors strip the `cdc.` prefix (RegexRouter) so the target tables keep their original names.
 * Kafka Connect internal topics, the Debezium schema history topic and the table topics are created by Terraform. Confluent Cloud sets the replication factor to 3, so the connectors do not need topic-creation permissions at runtime.
 * `cloud.env` (API keys, Kafka and Schema Registry endpoints), `.env`, `lightning-jdbc.properties` and the Terraform state contain sensitive values; all are git-ignored.
+
+## Taking it to production: best practices
+
+The demo keeps a few shortcuts so it runs on a laptop. This section lists what to change for a production setup, in order of importance.
+
+### Identity and access
+* **One service account per connector, least privilege** (already done here, see [What Terraform creates](#what-terraform-creates)): source `DeveloperWrite`, sinks `DeveloperRead`, a worker identity with no access to table data. Bind roles to **topic prefixes** (`cdc.*`) instead of `*`, so a new table needs no new binding, and to **named consumer groups** for the sinks.
+* **Separate the provisioning identity from the runtime identities.** `app-manager` (topic creation) is used only by Terraform; the demo gives it `EnvironmentAdmin`. In production scope it to the cluster, or run Terraform from CI with a short-lived Cloud API key.
+* **Rotate API keys.** Keys are created per service account, so one can be replaced without touching the others. For production prefer **OAuth/OIDC identity pools** over static API keys if your security team requires short-lived credentials.
+* **Do not keep secrets in files or images.** The demo passes them through `cloud.env` and `${env:...}`. In production inject them from a secret manager (HashiCorp Vault, AWS Secrets Manager, Docker/Swarm secrets) and resolve them with a `ConfigProvider` (`FileConfigProvider` with files mounted as secrets, or a Vault provider), so they never show in `docker inspect` or the Connect REST API.
+* **Use dedicated database users**, not `sa` / `postgres` / `db2inst1`: `db_datareader` plus the CDC schema for Debezium on SQL Server; `INSERT/UPDATE/DELETE` on the target tables only for each sink. Enable TLS on every database connection (`database.encrypt=true` with a trusted certificate, `sslmode=verify-full`, Db2 SSL) instead of `trustServerCertificate`.
+
+### Topics and schemas
+* **Pre-create topics with Terraform, no auto-creation** (done): connectors never need `CREATE` permission, and partitions, retention and compaction are code-reviewed. Keep the naming convention (`cdc.<table>`): it drives the RBAC prefix, makes lineage readable and keeps raw CDC topics separate from derived ones.
+* **Partition count is a capacity decision.** The demo uses **1 partition per topic** (requirement for this demo, and it preserves global order). That means each sink topic is consumed by a single task. For a real workload size partitions for the target throughput (rows/s ÷ per-task rate, plus headroom), because **a partition can be consumed by only one sink task**: `tasks.max` above the partition count adds nothing. Order is guaranteed per key, which is what a keyed upsert needs. Partitions can be increased later but never reduced.
+* **Replication factor 3 and `min.insync.replicas=2`** (fixed by Confluent Cloud). Keep producers on `acks=all` (the default) and idempotence on.
+* **Compacted topics for table state** keep the latest value per key forever. If you also need history or replay, add retention-based topics, or a Tableflow/archive sink, rather than turning compaction off. The **schema history topic must never expire** (`retention.ms=-1`, done) and should not be shared between connectors.
+* **Schema Registry**: keep the compatibility mode at `BACKWARD` (or `FULL`) per subject, disable auto-registration for everything except the source (the sinks cannot register schemas anyway: `DeveloperRead`), and consider **data contracts** (rules and metadata) to reject bad data. Enable `auto.evolve=false` on sinks (done) and roll out target table changes with migrations before the source schema change.
+* Consider a **dead letter queue** on the sinks (`errors.tolerance=all`, `errors.deadletterqueue.topic.name`, `errors.deadletterqueue.context.headers.enable=true`) so one bad record does not stop replication; give the sink account `DeveloperWrite` on that topic only, and alert on it.
+
+### Connect workers
+* **Separate clusters per role** (done): the source and the sinks scale, fail and are upgraded independently, and a stuck sink never blocks CDC capture. Use a different `group.id` and internal topics per cluster. Do not share a cluster across environments.
+* **Pin versions**: Confluent Platform, Debezium and the JDBC connector (`CP_VERSION`, `DEBEZIUM_SQLSERVER_VERSION`, `JDBC_CONNECTOR_VERSION`) to explicit versions in your image and push it to a private registry. The demo uses `latest` for the JDBC connector.
+* **Production internal topics**: replication factor 3 and, where you can choose, the usual partition counts (config 1, offsets 25, status 5). The demo forces 1 partition on offsets and status. This is fine for small clusters but limits throughput of offset commits for very large connector counts.
+* **Manage connectors as code**: keep the JSON in Git (as here) and deploy it through CI with the REST API (`PUT /connectors/<name>/config` is idempotent and updates a running connector in place, unlike the delete-and-recreate `deploy-connectors.sh` used here for the demo). Never `DELETE` a Debezium connector in production: its offsets would be lost and it would snapshot again.
+* **Secure the REST API**: it is unauthenticated by default and can create connectors, and with `${env:}`-style providers a connector config can read worker secrets. Bind it to a private network, put it behind a reverse proxy with TLS and authentication (or `rest.extension.classes` with basic auth), and block access from outside the operations network.
+* **Observability**: enable JMX (`KAFKA_JMX_PORT`) and scrape with Prometheus, or send metrics to Confluent Cloud Metrics API / Datadog. Alert on connector and task state (`FAILED`), sink consumer lag (visible in the Cloud console), source `MilliSecondsBehindSource` and the SQL Server CDC cleanup/capture jobs, schema history topic errors, and worker rebalances.
+* **Containers**: `restart: unless-stopped`, resource limits (`mem_limit`, JVM `KAFKA_HEAP_OPTS`), healthchecks on `GET /connectors`, a log driver that ships to your log platform, and a read-only root filesystem with a volume for `/tmp` where possible.
+* **Network**: workers only need outbound `:9092` and `:443` to Confluent Cloud and the database ports. For regulated environments use **Confluent Cloud private networking** (PrivateLink / VPC peering / Transit Gateway) instead of public endpoints, and an egress allow-list.
+* **Or let Confluent run them**: the same connectors exist as fully managed connectors in Confluent Cloud (no workers to operate; see the references below). Self-managed is the right choice when the databases are only reachable from your own network.
+
+### Operations
+* Test the failure modes before the demo or go-live: stop one worker, restart a sink, rotate a key, change a column in SQL Server, and confirm replication resumes. Recreating the Kafka topics (`./start.sh`) resets the demo, but must never be part of a production procedure.
+* Keep the Terraform state in a **remote backend** with locking (S3 + DynamoDB, Terraform Cloud) instead of `terraform/terraform.tfstate`, and mark outputs with secrets as `sensitive` (done).
+
+## Distributing the self-managed connectors across two or more VMs
+
+Kafka Connect **distributed mode** is built for this: every worker that uses the same `group.id`, the same bootstrap servers and the same three internal topics joins one Connect cluster. The workers elect a leader, spread connectors and tasks across all members, store configs, offsets and status in Kafka (Confluent Cloud here) rather than on disk, and **redistribute the tasks of a dead worker to the survivors** automatically. So the VMs are interchangeable and stateless: all you do is run the same container on each VM.
+
+```mermaid
+flowchart LR
+ subgraph VM1["VM 1"]
+ S1["connect-source<br/>worker A"]
+ K1["connect-sink<br/>worker A"]
+ end
+ subgraph VM2["VM 2"]
+ S2["connect-source<br/>worker B (standby)"]
+ K2["connect-sink<br/>worker B"]
+ end
+ subgraph VM3["VM 3 (optional)"]
+ K3["connect-sink<br/>worker C"]
+ end
+ LB["Reverse proxy / load balancer<br/>(REST API)"]
+ CC[("Confluent Cloud<br/>Kafka + Schema Registry")]
+ S1 & S2 --> CC
+ K1 & K2 & K3 --> CC
+ LB --- S1 & S2 & K1 & K2 & K3
+```
+
+### What each cluster gains
+| Cluster | Connector tasks | What more VMs give you |
+|---|---|---|
+| `connect-source` | Debezium SQL Server runs **one task only** (`tasks.max=1`: the transaction log is read sequentially) | **High availability**: worker B is an idle standby; if VM 1 dies, the task restarts on VM 2 (offsets are in Kafka, the schema history in its topic) and resumes from the last committed LSN. No throughput gain. |
+| `connect-sink` | Each sink runs up to `tasks.max` tasks, each reading a share of the topic partitions | **Availability and scale**: tasks are rebalanced across the VMs. Throughput only scales if the topics have **more than one partition** (this demo uses one: set a higher count in `terraform/main.tf` first) and `tasks.max` is raised. |
+
+### How to run it
+1. **Same image on every VM**: build `connect/` once, push it to a registry and `docker pull` it on each VM, so all workers have identical plugin versions (a mixed-version cluster misbehaves during rebalances).
+2. **Same cluster settings on every VM of a cluster**: `CONNECT_GROUP_ID`, `CONNECT_*_STORAGE_TOPIC`, the converters, the `CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY` and the credentials of the worker. Nothing else is shared, there is no VM-to-VM configuration.
+3. **Only one setting differs per VM, the advertised address**. Workers forward REST requests to the leader, so `CONNECT_REST_ADVERTISED_HOST_NAME` must be an address the other VMs can reach (the VM's private DNS name or IP, not `connect-source`) and port `8083` must be open between the VMs (and only to them and your operations network):
+
+```yaml
+# docker-compose.yml on each VM (excerpt); VM_HOSTNAME is the VM's private DNS name
+services:
+  connect-sink:
+    image: registry.example.com/db-replication-connect:<pinned-version>   # same on every VM
+    restart: unless-stopped
+    ports: ["8083:8083"]
+    environment:
+      CONNECT_REST_ADVERTISED_HOST_NAME: ${VM_HOSTNAME}
+      CONNECT_REST_ADVERTISED_PORT: 8083
+      CONNECT_GROUP_ID: db-replication-connect-sink            # identical on all VMs of this cluster
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-sink-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-sink-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-sink-status
+      # ... same bootstrap / SASL / converter settings as in docker-compose.yml, secrets from your secret store
+```
+4. **Reach the databases from every VM.** The connector configs use the Docker names `mssql`, `postgres` and `db2`; on separate VMs use the databases' real DNS names (parameterise them in `gen_connectors.py`), because a connector task can run on **any** worker of its cluster. Open the firewall from **all** VMs of a cluster to the database it uses.
+5. **Deploy connectors once, to any worker** (`PUT /connectors/<name>/config` against the load balancer or any VM): the config is stored in Kafka and the cluster distributes the tasks. Do not post the same connector to each VM.
+6. **Put the REST API behind one stable name** (internal load balancer or reverse proxy with TLS and authentication) with a health check on `GET /`, so deployment scripts and monitoring do not depend on one VM.
+7. **Spread across failure domains**: put the VMs in different availability zones or racks, and use at least **2 VMs per cluster** (3 for sinks that must survive a failure under load, so the survivors have headroom). Size each VM to run **all** tasks of its cluster if the others fail.
+8. **Rolling upgrades**: update one VM at a time and wait until its worker has rejoined and tasks are `RUNNING` before the next one. Use `scheduled.rebalance.max.delay.ms` (default 5 minutes) so a short restart does not trigger a full reshuffle, and the default `connect.protocol=sessioned` / incremental cooperative rebalancing so a join or leave only moves the affected tasks.
+9. **Separate by workload when it helps**: you can run a third cluster for heavy sinks, or one sink cluster per target database, using the same pattern (own group id, own internal topics, own service account).
+
+For orchestrators, the same design maps directly: Docker Swarm (`deploy.replicas: 2` with `placement.max_replicas_per_node: 1`) or Kubernetes (a `Deployment` or Confluent for Kubernetes `Connect` resource with 2+ replicas and pod anti-affinity) keep the number of workers constant and restart them, while Connect itself handles task placement.
 
 ## Notes
 
 * Fixed container names and ports are shared with the local-only demo: **run one demo at a time** (`start.sh` tells you to stop the other one).
 * Deletes work as in the local demo: the source emits a tombstone (key + null value), and the sinks delete the row (`delete.enabled=true` with `pk.mode=record_key`).
 * If Terraform gets a `401`/`403` right after creating the cluster, RBAC role bindings and API keys may still be propagating. Run `./start.sh` again; it continues where it stopped.
-* If the Kafka Connect worker cannot start, `start.sh` prints its log. Usual causes are incorrect Confluent Cloud credentials or no outbound access to `*.confluent.cloud:9092`.
+* If a Kafka Connect worker cannot start, `start.sh` prints its log. Usual causes are incorrect Confluent Cloud credentials or no outbound access to `*.confluent.cloud:9092`.
 
 ## Confluent Cloud references
 

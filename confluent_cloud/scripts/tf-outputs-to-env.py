@@ -19,13 +19,17 @@ env = {
     "CC_CLUSTER_ID": v("cc_kafka_cluster_id"),
     # SASL_SSL://pkc-xxxx.eu-central-1.aws.confluent.cloud:9092 -> host:port
     "CC_KAFKA_BOOTSTRAP": v("cc_kafka_cluster_bootstrap").split("://", 1)[-1],
-    "CC_KAFKA_API_KEY": v("clients_kafka_cluster_key"),
-    "CC_KAFKA_API_SECRET": v("clients_kafka_cluster_secret"),
     "CC_SR_URL": v("cc_sr_cluster_endpoint"),
-    "CC_SR_API_KEY": v("sr_cluster_key"),
-    "CC_SR_API_SECRET": v("sr_cluster_secret"),
     "CC_SR_PACKAGE": v("cc_sr_cluster_package"),
     "CC_SR_REGION": str(v("cc_sr_cluster_region")),
 }
+# one Kafka (+ Schema Registry) API key per identity: worker, source, pgsink, db2sink
+for ident, c in v("connect_credentials").items():
+    prefix = f"CC_{ident.upper()}_"
+    env[prefix + "KAFKA_API_KEY"] = c["kafka_key"]
+    env[prefix + "KAFKA_API_SECRET"] = c["kafka_secret"]
+    if "sr_key" in c:
+        env[prefix + "SR_API_KEY"] = c["sr_key"]
+        env[prefix + "SR_API_SECRET"] = c["sr_secret"]
 for k, val in env.items():
     print(f"{k}='{val}'")

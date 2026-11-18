@@ -7,67 +7,108 @@
 # Same container names and ports as the local-only demo in the parent folder: run one at a time.
 name: db-replication-cloud
 
+# Settings shared by both Connect workers (source and sink)
+x-connect-common: &connect-common
+  build:
+    context: ../connect
+    args:
+      CP_VERSION: ${CP_VERSION:-8.2.0}
+      DEBEZIUM_SQLSERVER_VERSION: ${DEBEZIUM_SQLSERVER_VERSION:-3.1.2}
+      JDBC_CONNECTOR_VERSION: ${JDBC_CONNECTOR_VERSION:-latest}
+  image: db-replication-connect:local
+
+x-connect-env: &connect-env
+    # --- Worker: Kafka (Confluent Cloud) with the connect-worker identity (internal topics + worker groups only)
+    CC_KAFKA_BOOTSTRAP: ${CC_KAFKA_BOOTSTRAP:-not-set}
+    CC_SR_URL: ${CC_SR_URL:-not-set}
+    CONNECT_CONFIG_PROVIDERS: env
+    CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
+    CONNECT_BOOTSTRAP_SERVERS: ${CC_KAFKA_BOOTSTRAP:-not-set}
+    CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+    # worker-level converters are unused: every connector sets its own Avro converters (and
+    # Schema Registry credentials), so the worker identity needs no Schema Registry access
+    CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+    CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+    CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+    # lets each connector use its own service account (producer.override.* / consumer.override.*)
+    CONNECT_CONNECTOR_CLIENT_CONFIG_OVERRIDE_POLICY: All
+
+    # --- Confluent Cloud security of the worker (and of its default producer/consumer/admin clients)
+    CONNECT_SECURITY_PROTOCOL: SASL_SSL
+    CONNECT_SASL_MECHANISM: PLAIN
+    CONNECT_SASL_JAAS_CONFIG: &worker-jaas 'org.apache.kafka.common.security.plain.PlainLoginModule required username="${CC_WORKER_KAFKA_API_KEY:-not-set}" password="${CC_WORKER_KAFKA_API_SECRET:-not-set}";'
+    CONNECT_PRODUCER_SECURITY_PROTOCOL: SASL_SSL
+    CONNECT_PRODUCER_SASL_MECHANISM: PLAIN
+    CONNECT_PRODUCER_SASL_JAAS_CONFIG: *worker-jaas
+    CONNECT_CONSUMER_SECURITY_PROTOCOL: SASL_SSL
+    CONNECT_CONSUMER_SASL_MECHANISM: PLAIN
+    CONNECT_CONSUMER_SASL_JAAS_CONFIG: *worker-jaas
+    CONNECT_ADMIN_SECURITY_PROTOCOL: SASL_SSL
+    CONNECT_ADMIN_SASL_MECHANISM: PLAIN
+    CONNECT_ADMIN_SASL_JAAS_CONFIG: *worker-jaas
+
 services:
 
   # ------------------------------------------------------------------ Kafka Connect (self-managed) -> Confluent Cloud
-  connect:
-    build:
-      context: ../connect
-      args:
-        CP_VERSION: ${CP_VERSION:-8.2.0}
-        DEBEZIUM_SQLSERVER_VERSION: ${DEBEZIUM_SQLSERVER_VERSION:-3.1.2}
-        JDBC_CONNECTOR_VERSION: ${JDBC_CONNECTOR_VERSION:-latest}
-    image: db-replication-connect:local
-    hostname: connect
-    container_name: connect
+  # Cluster 1: Debezium SQL Server CDC source
+  connect-source:
+    <<: *connect-common
+    hostname: connect-source
+    container_name: connect-source
     ports:
       - "8083:8083"
     environment:
-      # --- Confluent Cloud values, referenced by the connector configs as ${env:CC_...}
-      CC_KAFKA_BOOTSTRAP: ${CC_KAFKA_BOOTSTRAP:-not-set}
-      CC_KAFKA_API_KEY: ${CC_KAFKA_API_KEY:-not-set}
-      CC_KAFKA_API_SECRET: ${CC_KAFKA_API_SECRET:-not-set}
-      CC_SR_URL: ${CC_SR_URL:-not-set}
-      CC_SR_API_KEY: ${CC_SR_API_KEY:-not-set}
-      CC_SR_API_SECRET: ${CC_SR_API_SECRET:-not-set}
-      CONNECT_CONFIG_PROVIDERS: env
-      CONNECT_CONFIG_PROVIDERS_ENV_CLASS: org.apache.kafka.common.config.provider.EnvVarConfigProvider
-
-      # --- Worker
-      CONNECT_BOOTSTRAP_SERVERS: ${CC_KAFKA_BOOTSTRAP:-not-set}
-      CONNECT_REST_ADVERTISED_HOST_NAME: connect
-      CONNECT_GROUP_ID: db-replication-connect
-      # internal topics are created by terraform (replication factor 3 is fixed in Confluent Cloud)
-      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      <<: *connect-env
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect-source
+      # identities used by the connectors of this cluster (referenced as ${env:CC_..._API_KEY})
+      CC_WORKER_KAFKA_API_KEY: ${CC_WORKER_KAFKA_API_KEY:-not-set}
+      CC_WORKER_KAFKA_API_SECRET: ${CC_WORKER_KAFKA_API_SECRET:-not-set}
+      CC_SOURCE_KAFKA_API_KEY: ${CC_SOURCE_KAFKA_API_KEY:-not-set}
+      CC_SOURCE_KAFKA_API_SECRET: ${CC_SOURCE_KAFKA_API_SECRET:-not-set}
+      CC_SOURCE_SR_API_KEY: ${CC_SOURCE_SR_API_KEY:-not-set}
+      CC_SOURCE_SR_API_SECRET: ${CC_SOURCE_SR_API_SECRET:-not-set}
+      CONNECT_GROUP_ID: db-replication-connect-source
+      # internal topics are created by terraform (1 partition, replication factor 3 is fixed in Confluent Cloud)
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-source-configs
       CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
-      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-source-offsets
+      CONNECT_OFFSET_STORAGE_PARTITIONS: 1
       CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
-      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-source-status
+      CONNECT_STATUS_STORAGE_PARTITIONS: 1
       CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
-      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
-      CONNECT_KEY_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_KEY_CONVERTER_SCHEMA_REGISTRY_URL: ${CC_SR_URL:-not-set}
-      CONNECT_KEY_CONVERTER_BASIC_AUTH_CREDENTIALS_SOURCE: USER_INFO
-      CONNECT_KEY_CONVERTER_BASIC_AUTH_USER_INFO: ${CC_SR_API_KEY:-not-set}:${CC_SR_API_SECRET:-not-set}
-      CONNECT_VALUE_CONVERTER: io.confluent.connect.avro.AvroConverter
-      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: ${CC_SR_URL:-not-set}
-      CONNECT_VALUE_CONVERTER_BASIC_AUTH_CREDENTIALS_SOURCE: USER_INFO
-      CONNECT_VALUE_CONVERTER_BASIC_AUTH_USER_INFO: ${CC_SR_API_KEY:-not-set}:${CC_SR_API_SECRET:-not-set}
-      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
 
-      # --- Confluent Cloud security: worker, producers (source), consumers (sink), admin client
-      CONNECT_SECURITY_PROTOCOL: SASL_SSL
-      CONNECT_SASL_MECHANISM: PLAIN
-      CONNECT_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="${CC_KAFKA_API_KEY:-not-set}" password="${CC_KAFKA_API_SECRET:-not-set}";'
-      CONNECT_PRODUCER_SECURITY_PROTOCOL: SASL_SSL
-      CONNECT_PRODUCER_SASL_MECHANISM: PLAIN
-      CONNECT_PRODUCER_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="${CC_KAFKA_API_KEY:-not-set}" password="${CC_KAFKA_API_SECRET:-not-set}";'
-      CONNECT_CONSUMER_SECURITY_PROTOCOL: SASL_SSL
-      CONNECT_CONSUMER_SASL_MECHANISM: PLAIN
-      CONNECT_CONSUMER_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="${CC_KAFKA_API_KEY:-not-set}" password="${CC_KAFKA_API_SECRET:-not-set}";'
-      CONNECT_ADMIN_SECURITY_PROTOCOL: SASL_SSL
-      CONNECT_ADMIN_SASL_MECHANISM: PLAIN
-      CONNECT_ADMIN_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="${CC_KAFKA_API_KEY:-not-set}" password="${CC_KAFKA_API_SECRET:-not-set}";'
+  # Cluster 2: JDBC sinks (PostgreSQL, Db2)
+  connect-sink:
+    <<: *connect-common
+    hostname: connect-sink
+    container_name: connect-sink
+    ports:
+      - "8084:8083"
+    environment:
+      <<: *connect-env
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect-sink
+      # identities used by the connectors of this cluster (referenced as ${env:CC_..._API_KEY})
+      CC_WORKER_KAFKA_API_KEY: ${CC_WORKER_KAFKA_API_KEY:-not-set}
+      CC_WORKER_KAFKA_API_SECRET: ${CC_WORKER_KAFKA_API_SECRET:-not-set}
+      CC_PGSINK_KAFKA_API_KEY: ${CC_PGSINK_KAFKA_API_KEY:-not-set}
+      CC_PGSINK_KAFKA_API_SECRET: ${CC_PGSINK_KAFKA_API_SECRET:-not-set}
+      CC_PGSINK_SR_API_KEY: ${CC_PGSINK_SR_API_KEY:-not-set}
+      CC_PGSINK_SR_API_SECRET: ${CC_PGSINK_SR_API_SECRET:-not-set}
+      CC_DB2SINK_KAFKA_API_KEY: ${CC_DB2SINK_KAFKA_API_KEY:-not-set}
+      CC_DB2SINK_KAFKA_API_SECRET: ${CC_DB2SINK_KAFKA_API_SECRET:-not-set}
+      CC_DB2SINK_SR_API_KEY: ${CC_DB2SINK_SR_API_KEY:-not-set}
+      CC_DB2SINK_SR_API_SECRET: ${CC_DB2SINK_SR_API_SECRET:-not-set}
+      CONNECT_GROUP_ID: db-replication-connect-sink
+      # internal topics are created by terraform (1 partition, replication factor 3 is fixed in Confluent Cloud)
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-sink-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-sink-offsets
+      CONNECT_OFFSET_STORAGE_PARTITIONS: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 3
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-sink-status
+      CONNECT_STATUS_STORAGE_PARTITIONS: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 3
 
   # ------------------------------------------------------------------ Source: SQL Server 2019
   mssql:

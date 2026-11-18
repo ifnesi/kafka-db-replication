@@ -1,7 +1,7 @@
 #!/bin/bash
 # Confluent Cloud variant: deploys Kafka (Standard) + Schema Registry (Essentials) with
 # terraform, then starts the local side (SQL Server, Postgres, Db2, data generator,
-# self-managed Kafka Connect, CloudBeaver) wired to it.
+# two self-managed Kafka Connect clusters, CloudBeaver) wired to it.
 #
 #   ./start.sh                  prompts for CONFLUENT_CLOUD_API_KEY / CONFLUENT_CLOUD_API_SECRET
 #                               if they are not already set in the environment
@@ -18,7 +18,7 @@ colima_start   # no-op if Colima isn't installed (e.g. Docker Desktop)
 docker info > /dev/null 2>&1 || { echo "ERROR: Docker is not running." >&2; exit 1; }
 
 # Fixed container names/ports are shared with the local-only demo in the parent folder
-for c in connect mssql data-generator postgres db2 cloudbeaver broker schema-registry control-center; do
+for c in connect connect-source connect-sink mssql data-generator postgres db2 cloudbeaver broker schema-registry control-center; do
   proj=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$c" 2>/dev/null || true)
   if [ -n "$proj" ] && [ "$proj" != "db-replication-cloud" ]; then
     echo "ERROR: container '$c' belongs to another compose project ('$proj'), probably the local-only demo." >&2
@@ -43,7 +43,7 @@ Terraform will create (or update) in your Confluent Cloud organization:
   - environment  db-replication-<random>   (Stream Governance: Essentials = Schema Registry)
   - Kafka cluster  Standard, AWS eu-central-1 (Frankfurt), single zone
   - 3 service accounts + role bindings + API keys
-  - 24 topics (20 tables + Connect internal + Debezium schema history)
+  - 28 topics, 1 partition each (20 cdc.<table> + 2x3 Connect internal + license + Debezium schema history)
 These resources are billed while they exist: remove them with ./stop.sh (answer 'y' to destroy).
 MSG
   if [ -z "$ASSUME_YES" ] && [ -t 0 ]; then
@@ -84,7 +84,8 @@ wait_for() {  # label, command, max attempts (5s each)
 }
 
 echo; echo "Waiting for services (Db2 first boot takes a few minutes)..."
-wait_for "Kafka Connect"   "curl -sf http://localhost:8083/"     60 || { echo "  Connect did not start (cannot reach Confluent Cloud?). Logs:"; docker logs --tail 20 connect; exit 1; }
+wait_for "Connect (source)" "curl -sf http://localhost:8083/"     60 || { echo "  Connect did not start (cannot reach Confluent Cloud?). Logs:"; docker logs --tail 20 connect-source; exit 1; }
+wait_for "Connect (sink)"   "curl -sf http://localhost:8084/"     60 || { echo "  Connect did not start (cannot reach Confluent Cloud?). Logs:"; docker logs --tail 20 connect-sink; exit 1; }
 wait_for "CloudBeaver"     "curl -sf http://localhost:8978/"     30
 wait_for "PostgreSQL"      "docker exec postgres pg_isready -U postgres -d demo" 30
 wait_for "SQL Server"      "docker exec mssql /opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P 'Password!123' -Q 'SELECT 1'" 60
@@ -103,7 +104,8 @@ Confluent Cloud:
 
 Local services:
   CloudBeaver      http://localhost:8978  - SQL client for all 3 DBs (connections pre-loaded; admin: cbadmin / Admin123)
-  Kafka Connect    http://localhost:8083  (self-managed, connected to Confluent Cloud)
+  Connect (source) http://localhost:8083  (Debezium SQL Server CDC; self-managed, connected to Confluent Cloud)
+  Connect (sink)   http://localhost:8084  (JDBC sinks PostgreSQL + Db2; self-managed, connected to Confluent Cloud)
   SQL Server       localhost:1433  (sa / Password!123, db demo_db)
   PostgreSQL       localhost:5432  (postgres / postgres, db demo)
   Db2              localhost:50000 (db2inst1 / db2inst1-pwd, db demo)
