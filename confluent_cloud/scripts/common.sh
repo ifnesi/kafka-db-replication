@@ -30,6 +30,9 @@ load_dotenv() {
 }
 load_dotenv
 
+# true for true/yes/1/on (any case): used for the ENABLE_* feature flags in .env
+is_true() { case "$(printf %s "$1" | tr "[:upper:]" "[:lower:]")" in true|yes|1|on) return 0 ;; *) return 1 ;; esac; }
+
 # ---------------------------------------------------------------------------
 # Confluent Cloud credentials: taken from the environment or .env or prompted
 # ---------------------------------------------------------------------------

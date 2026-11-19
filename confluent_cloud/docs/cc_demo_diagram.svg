@@ -1,0 +1,158 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1130" viewBox="0 0 1800 1130" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+<defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker><marker id="arrs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="context-stroke"/></marker></defs>
+<rect width="1800" height="1130" fill="white"/>
+<rect x="20" y="20" width="1050" height="1090" rx="22" fill="#e6f0fc" stroke="#24518f" stroke-width="3"/>
+<text x="50" y="72" font-size="34" font-weight="800" fill="#24518f" text-anchor="start">Your machine (Docker)</text>
+<rect x="1100" y="20" width="680" height="1090" rx="22" fill="#f3ecfd" stroke="#6a3fb0" stroke-width="3"/>
+<text x="1130" y="72" font-size="34" font-weight="800" fill="#6a3fb0" text-anchor="start">Confluent Cloud</text>
+<text x="1130" y="102" font-size="17" font-weight="600" fill="#6a3fb0" text-anchor="start">provisioned by Terraform, AWS Frankfurt</text>
+<text x="1130" y="126" font-size="15" font-weight="400" fill="#4a5568" text-anchor="start" font-style="italic">least-privilege RBAC: one service account per component</text>
+<rect x="40" y="145" width="300" height="120" rx="12" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<text x="58" y="180.5" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">Python data generator</text>
+<text x="58" y="205.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">100 rows/table, then</text>
+<text x="58" y="226.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">1 change/10s</text>
+<text x="58" y="247.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">+ data_sensors: 10 rows</text>
+<path d="M375,154 v102 a90.0,14 0 0 0 180,0 v-102" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<ellipse cx="465.0" cy="154" rx="90.0" ry="14" fill="white" stroke="#24518f" stroke-width="2"/>
+<text x="465.0" y="215.0" font-size="18" font-weight="700" fill="#14213d" text-anchor="middle">SQL Server 2019</text>
+<text x="465.0" y="237.0" font-size="14" font-weight="400" fill="#4a5568" text-anchor="middle">CDC enabled</text>
+<path d="M340,205 H369" fill="none" stroke="#14213d" stroke-width="2.2" marker-end="url(#arr)"/>
+<rect x="610" y="135" width="440" height="140" rx="14" fill="#dceafb" stroke="#24518f" stroke-width="2"/>
+<text x="626" y="158" font-size="14" font-weight="700" fill="#24518f" text-anchor="start">Kafka Connect cluster 1 · connect-source :8083</text>
+<rect x="626" y="168" width="408" height="92" rx="12" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<line x1="662.0" y1="192.0" x2="662.0" y2="214.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="214.0" x2="662.0" y2="236.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="214.0" x2="679.0" y2="203.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="214.0" x2="679.0" y2="225.0" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="192.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="214.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="236.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="679.0" cy="203.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="679.0" cy="225.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<line x1="694" y1="184" x2="694" y2="244" stroke="#24518f" stroke-width="1.5"/>
+<text x="708" y="210.5" font-size="18" font-weight="700" fill="#14213d" text-anchor="start">Debezium SQL Server</text>
+<text x="708" y="235.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">CDC source connector (1 task)</text>
+<path d="M555,205 H620" fill="none" stroke="#14213d" stroke-width="2.2" marker-end="url(#arr)"/>
+<text x="584" y="194" font-size="13" font-weight="600" fill="#4a5568" text-anchor="middle">CDC</text>
+<rect x="610" y="305" width="440" height="270" rx="14" fill="#dceafb" stroke="#24518f" stroke-width="2"/>
+<text x="626" y="328" font-size="14" font-weight="700" fill="#24518f" text-anchor="start">Kafka Connect cluster 2 · connect-sink :8084</text>
+<rect x="626" y="340" width="408" height="100" rx="12" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<line x1="662.0" y1="368.0" x2="662.0" y2="390.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="390.0" x2="662.0" y2="412.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="390.0" x2="679.0" y2="379.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="390.0" x2="679.0" y2="401.0" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="368.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="390.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="412.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="679.0" cy="379.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="679.0" cy="401.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<line x1="694" y1="356" x2="694" y2="424" stroke="#24518f" stroke-width="1.5"/>
+<text x="708" y="386.5" font-size="18" font-weight="700" fill="#14213d" text-anchor="start">JDBC sink → PostgreSQL</text>
+<text x="708" y="411.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">postgres-sink (2 tasks), upsert + delete</text>
+<rect x="626" y="458" width="408" height="100" rx="12" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<line x1="662.0" y1="486.0" x2="662.0" y2="508.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="508.0" x2="662.0" y2="530.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="508.0" x2="679.0" y2="497.0" stroke="#14213d" stroke-width="2.5"/>
+<line x1="662.0" y1="508.0" x2="679.0" y2="519.0" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="486.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="508.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="662.0" cy="530.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="679.0" cy="497.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<circle cx="679.0" cy="519.0" r="6.0" fill="white" stroke="#14213d" stroke-width="2.5"/>
+<line x1="694" y1="474" x2="694" y2="542" stroke="#24518f" stroke-width="1.5"/>
+<text x="708" y="504.5" font-size="18" font-weight="700" fill="#14213d" text-anchor="start">JDBC sink → IBM Db2</text>
+<text x="708" y="529.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">db2-sink (2 tasks), upsert + delete</text>
+<path d="M390,344 v87 a75.0,14 0 0 0 150,0 v-87" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<ellipse cx="465.0" cy="344" rx="75.0" ry="14" fill="white" stroke="#24518f" stroke-width="2"/>
+<text x="465.0" y="397.5" font-size="18" font-weight="700" fill="#14213d" text-anchor="middle">PostgreSQL</text>
+<path d="M390,464 v87 a75.0,14 0 0 0 150,0 v-87" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<ellipse cx="465.0" cy="464" rx="75.0" ry="14" fill="white" stroke="#24518f" stroke-width="2"/>
+<text x="465.0" y="517.5" font-size="18" font-weight="700" fill="#14213d" text-anchor="middle">IBM Db2</text>
+<path d="M626,390 H546" fill="none" stroke="#14213d" stroke-width="2.2" marker-end="url(#arr)"/>
+<path d="M626,508 H546" fill="none" stroke="#14213d" stroke-width="2.2" marker-end="url(#arr)"/>
+<rect x="610" y="620" width="440" height="120" rx="12" fill="#fff7e6" stroke="#b7791f" stroke-width="2"/>
+<text x="628" y="666.0" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">Kafbat UI  :8080</text>
+<text x="628" y="691.0" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">DevOps console: connectors (pause / restart /</text>
+<text x="628" y="712.0" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">edit), topics, consumer lag, schemas</text>
+<rect x="40" y="620" width="300" height="120" rx="12" fill="#f4f9ff" stroke="#24518f" stroke-width="2"/>
+<text x="58" y="666.0" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">CloudBeaver  :8978</text>
+<text x="58" y="691.0" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">web SQL client for</text>
+<text x="58" y="712.0" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">the 3 databases</text>
+<path d="M830,620 V581" fill="none" stroke="#b7791f" stroke-width="2.2" marker-end="url(#arr)"/>
+<path d="M610,680 H585 V290 H660 V281" fill="none" stroke="#b7791f" stroke-width="2.2" marker-end="url(#arr)"/>
+<text x="840" y="604" font-size="13" font-weight="700" fill="#b7791f" text-anchor="start">Connect REST</text>
+<rect x="1190" y="145" width="570" height="150" rx="14" fill="#ece0fb" stroke="#6a3fb0" stroke-width="2"/>
+<line x1="1235.0" y1="191.4" x2="1235.0" y2="220.0" stroke="#6a3fb0" stroke-width="3.25"/>
+<line x1="1235.0" y1="220.0" x2="1235.0" y2="248.6" stroke="#6a3fb0" stroke-width="3.25"/>
+<line x1="1235.0" y1="220.0" x2="1257.1" y2="205.7" stroke="#6a3fb0" stroke-width="3.25"/>
+<line x1="1235.0" y1="220.0" x2="1257.1" y2="234.3" stroke="#6a3fb0" stroke-width="3.25"/>
+<circle cx="1235.0" cy="191.4" r="7.800000000000001" fill="white" stroke="#6a3fb0" stroke-width="3.25"/>
+<circle cx="1235.0" cy="220.0" r="7.800000000000001" fill="white" stroke="#6a3fb0" stroke-width="3.25"/>
+<circle cx="1235.0" cy="248.6" r="7.800000000000001" fill="white" stroke="#6a3fb0" stroke-width="3.25"/>
+<circle cx="1257.1" cy="205.7" r="7.800000000000001" fill="white" stroke="#6a3fb0" stroke-width="3.25"/>
+<circle cx="1257.1" cy="234.3" r="7.800000000000001" fill="white" stroke="#6a3fb0" stroke-width="3.25"/>
+<line x1="1275" y1="165" x2="1275" y2="275" stroke="#6a3fb0" stroke-width="1.5"/>
+<text x="1292" y="190" font-size="24" font-weight="800" fill="#14213d" text-anchor="start">Kafka Standard cluster</text>
+<text x="1292" y="218" font-size="16.5" font-weight="400" fill="#4a5568" text-anchor="start">20 compacted topics cdc.&lt;table&gt; (Avro)</text>
+<text x="1292" y="240" font-size="16.5" font-weight="400" fill="#4a5568" text-anchor="start">+ Connect internal, license, schema history</text>
+<text x="1292" y="262" font-size="16.5" font-weight="600" fill="#4a5568" text-anchor="start">28 topics, 1 partition each</text>
+<rect x="1480" y="365" width="280" height="105" rx="12" fill="#ece0fb" stroke="#6a3fb0" stroke-width="2"/>
+<text x="1498" y="403.5" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">Schema Registry</text>
+<text x="1498" y="428.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">Stream Governance</text>
+<text x="1498" y="449.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">Essentials</text>
+<path d="M1620,301 V359" fill="none" stroke="#6a3fb0" stroke-width="2.2" stroke-dasharray="7 6" marker-end="url(#arr)" marker-start="url(#arrs)"/>
+<path d="M1050,205 H1184" fill="none" stroke="#14213d" stroke-width="2.2" marker-end="url(#arr)"/>
+<rect x="1059.86" y="159.0" width="120.28000000000002" height="46" rx="9" fill="white" stroke="#14213d" stroke-width="1.4"/>
+<text x="1120" y="178.0" font-size="13.5" font-weight="700" fill="#14213d" text-anchor="middle">SASL_SSL</text>
+<text x="1120" y="196.0" font-size="13.5" font-weight="400" fill="#4a5568" text-anchor="middle">source-xxxxxx</text>
+<path d="M1190,250 H1150 V390 H1056" fill="none" stroke="#14213d" stroke-width="2.2" marker-end="url(#arr)"/>
+<path d="M1190,272 H1130 V508 H1056" fill="none" stroke="#14213d" stroke-width="2.2" marker-end="url(#arr)"/>
+<rect x="1056.08" y="417.0" width="127.84" height="64" rx="9" fill="white" stroke="#14213d" stroke-width="1.4"/>
+<text x="1120" y="436.0" font-size="13.5" font-weight="700" fill="#14213d" text-anchor="middle">SASL_SSL</text>
+<text x="1120" y="454.0" font-size="13.5" font-weight="400" fill="#4a5568" text-anchor="middle">pgsink-xxxxxx</text>
+<text x="1120" y="472.0" font-size="13.5" font-weight="400" fill="#4a5568" text-anchor="middle">db2sink-xxxxxx</text>
+<path d="M1050,650 H1230 V301" fill="none" stroke="#b7791f" stroke-width="2.2" marker-end="url(#arr)"/>
+<rect x="1079.86" y="627.0" width="120.28000000000002" height="46" rx="9" fill="white" stroke="#14213d" stroke-width="1.4"/>
+<text x="1140" y="646.0" font-size="13.5" font-weight="700" fill="#14213d" text-anchor="middle">SASL_SSL</text>
+<text x="1140" y="664.0" font-size="13.5" font-weight="400" fill="#4a5568" text-anchor="middle">kafbat-xxxxxx</text>
+<path d="M1050,712 H1660 V476" fill="none" stroke="#b7791f" stroke-width="2.2" marker-end="url(#arr)"/>
+<rect x="1499.86" y="689.0" width="120.28000000000002" height="46" rx="9" fill="white" stroke="#14213d" stroke-width="1.4"/>
+<text x="1560" y="708.0" font-size="13.5" font-weight="700" fill="#14213d" text-anchor="middle">HTTPS</text>
+<text x="1560" y="726.0" font-size="13.5" font-weight="400" fill="#4a5568" text-anchor="middle">kafbat-xxxxxx</text>
+<rect x="40" y="790" width="1010" height="300" rx="16" fill="none" stroke="#8a7aa8" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="60" y="822" font-size="15" font-weight="800" fill="#8a7aa8" text-anchor="start">OPTIONAL · off by default</text>
+<text x="60" y="870" font-size="15" font-weight="700" fill="#14213d" text-anchor="start">ENABLE_LIGHTNING_TABLES=true</text>
+<text x="60" y="891" font-size="14" font-weight="400" fill="#4a5568" text-anchor="start">deploy-connectors.sh runs lightning-tables.sh</text>
+<text x="60" y="1000" font-size="15" font-weight="700" fill="#14213d" text-anchor="start">ENABLE_CONFLUENT_MCP=true</text>
+<text x="60" y="1021" font-size="14" font-weight="400" fill="#4a5568" text-anchor="start">start.sh runs confluent-mcp.sh</text>
+<rect x="610" y="840" width="350" height="100" rx="12" fill="white" stroke="#8a7aa8" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="628" y="886.5" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">DBeaver</text>
+<text x="628" y="911.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">Confluent JDBC driver</text>
+<rect x="610" y="970" width="350" height="100" rx="12" fill="white" stroke="#8a7aa8" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="628" y="1016.5" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">Claude Code</text>
+<text x="628" y="1041.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">MCP client</text>
+<rect x="1190" y="840" width="300" height="105" rx="12" fill="white" stroke="#8a7aa8" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="1208" y="878.5" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">Lightning Tables</text>
+<text x="1208" y="903.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">SQL over selected</text>
+<text x="1208" y="924.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">topics (read-only)</text>
+<rect x="1390" y="828" width="90" height="24" rx="12" fill="white" stroke="#8a7aa8" stroke-width="1.5"/>
+<text x="1435.0" y="845" font-size="12.5" font-weight="700" fill="#8a7aa8" text-anchor="middle">OPTIONAL</text>
+<rect x="1190" y="970" width="570" height="105" rx="12" fill="white" stroke="#8a7aa8" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="1208" y="1008.5" font-size="20" font-weight="700" fill="#14213d" text-anchor="start">Confluent managed MCP server</text>
+<text x="1208" y="1033.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">environments, clusters, connectors, metrics,</text>
+<text x="1208" y="1054.5" font-size="15.5" font-weight="400" fill="#4a5568" text-anchor="start">topics, schemas, Flink SQL</text>
+<rect x="1660" y="958" width="90" height="24" rx="12" fill="white" stroke="#8a7aa8" stroke-width="1.5"/>
+<text x="1705.0" y="975" font-size="12.5" font-weight="700" fill="#8a7aa8" text-anchor="middle">OPTIONAL</text>
+<path d="M960,890 H1184" fill="none" stroke="#8a7aa8" stroke-width="2.2" stroke-dasharray="7 6" marker-end="url(#arr)"/>
+<rect x="977.84" y="867.0" width="188.32000000000002" height="46" rx="9" fill="white" stroke="#14213d" stroke-width="1.4"/>
+<text x="1072" y="886.0" font-size="13.5" font-weight="700" fill="#14213d" text-anchor="middle">HTTPS + Global API key</text>
+<text x="1072" y="904.0" font-size="13.5" font-weight="400" fill="#4a5568" text-anchor="middle">SELECT</text>
+<path d="M960,1020 H1184" fill="none" stroke="#8a7aa8" stroke-width="2.2" stroke-dasharray="7 6" marker-end="url(#arr)"/>
+<rect x="977.84" y="997.0" width="188.32000000000002" height="46" rx="9" fill="white" stroke="#14213d" stroke-width="1.4"/>
+<text x="1072" y="1016.0" font-size="13.5" font-weight="700" fill="#14213d" text-anchor="middle">HTTPS + Global API key</text>
+<text x="1072" y="1034.0" font-size="13.5" font-weight="400" fill="#4a5568" text-anchor="middle">MCP tools</text>
+<path d="M1330,295 V834" fill="none" stroke="#8a7aa8" stroke-width="2.2" stroke-dasharray="7 6" marker-end="url(#arr)"/>
+<text x="1340" y="800" font-size="14" font-weight="600" fill="#8a7aa8" text-anchor="start">enabled per topic</text>
+<path d="M1720,470 V964" fill="none" stroke="#8a7aa8" stroke-width="2.2" stroke-dasharray="7 6" marker-end="url(#arr)"/>
+<path d="M1750,295 V350 M1750,476 V964" fill="none" stroke="#8a7aa8" stroke-width="2.2" stroke-dasharray="7 6" marker-end="url(#arr)"/>
+</svg>

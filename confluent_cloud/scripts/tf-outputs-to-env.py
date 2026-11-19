@@ -22,6 +22,7 @@ env = {
     "CC_SR_URL": v("cc_sr_cluster_endpoint"),
     "CC_SR_PACKAGE": v("cc_sr_cluster_package"),
     "CC_SR_REGION": str(v("cc_sr_cluster_region")),
+    "CC_ORG_ID": v("cc_org_id"),
 }
 # one Kafka (+ Schema Registry) API key per identity: worker, source, pgsink, db2sink
 for ident, c in v("connect_credentials").items():
@@ -31,5 +32,9 @@ for ident, c in v("connect_credentials").items():
     if "sr_key" in c:
         env[prefix + "SR_API_KEY"] = c["sr_key"]
         env[prefix + "SR_API_SECRET"] = c["sr_secret"]
+# Kafbat UI (DevOps console)
+k = v("kafbat_credentials")
+env.update({"CC_KAFBAT_KAFKA_API_KEY": k["kafka_key"], "CC_KAFBAT_KAFKA_API_SECRET": k["kafka_secret"],
+            "CC_KAFBAT_SR_API_KEY": k["sr_key"], "CC_KAFBAT_SR_API_SECRET": k["sr_secret"]})
 for k, val in env.items():
     print(f"{k}='{val}'")

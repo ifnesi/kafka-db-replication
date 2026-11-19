@@ -219,6 +219,44 @@ services:
       retries: 3
       start_period: 600s
 
+  # ------------------------------------------------------------------ Kafbat UI: Confluent Cloud Kafka + Schema Registry + both Connect clusters
+  # Uses its own service account (kafbat-xxxxxx): read all topics/subjects, write the connector ones.
+  # Connectors are managed through the Connect REST APIs (http://connect-source:8083, http://connect-sink:8083).
+  kafbat:
+    image: ghcr.io/kafbat/kafka-ui:${KAFBAT_VERSION:-v1.4.2}
+    container_name: kafbat
+    hostname: kafbat
+    ports:
+      - "8080:8080"
+    depends_on:
+      - connect-source
+      - connect-sink
+    environment:
+      # login (single user; override with KAFBAT_USER / KAFBAT_PASSWORD)
+      AUTH_TYPE: LOGIN_FORM
+      SPRING_SECURITY_USER_NAME: ${KAFBAT_USER:-devops}
+      SPRING_SECURITY_USER_PASSWORD: ${KAFBAT_PASSWORD:-Devops123}
+      DYNAMIC_CONFIG_ENABLED: "false"
+      # Confluent Cloud Kafka cluster
+      KAFKA_CLUSTERS_0_NAME: confluent-cloud
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: ${CC_KAFKA_BOOTSTRAP:-not-set}
+      KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL: SASL_SSL
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_MECHANISM: PLAIN
+      KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: 'org.apache.kafka.common.security.plain.PlainLoginModule required username="${CC_KAFBAT_KAFKA_API_KEY:-not-set}" password="${CC_KAFBAT_KAFKA_API_SECRET:-not-set}";'
+      # Confluent Cloud Schema Registry
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: ${CC_SR_URL:-not-set}
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRYAUTH_USERNAME: ${CC_KAFBAT_SR_API_KEY:-not-set}
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRYAUTH_PASSWORD: ${CC_KAFBAT_SR_API_SECRET:-not-set}
+      # keys and values are both Avro (the connectors use AvroConverter for both): decode them with
+      # Schema Registry by default, so messages show the decoded key/row instead of raw bytes
+      KAFKA_CLUSTERS_0_DEFAULTKEYSERDE: SchemaRegistry
+      KAFKA_CLUSTERS_0_DEFAULTVALUESERDE: SchemaRegistry
+      # the two self-managed Connect clusters
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: connect-source
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect-source:8083
+      KAFKA_CLUSTERS_0_KAFKACONNECT_1_NAME: connect-sink
+      KAFKA_CLUSTERS_0_KAFKACONNECT_1_ADDRESS: http://connect-sink:8083
+
   # ------------------------------------------------------------------ Web SQL client for all 3 databases
   cloudbeaver:
     image: dbeaver/cloudbeaver:${CLOUDBEAVER_VERSION:-latest}

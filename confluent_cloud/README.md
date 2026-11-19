@@ -4,21 +4,23 @@ Same demo as the [local-only version](../README.md) (same 20 tables, data genera
 
 ![Demo Diagram](docs/cc_demo_diagram.png)
 
-The diagram shows a single Kafka Connect box; in this version it is split into two clusters: `connect-source` (the Debezium CDC source) and `connect-sink` (the PostgreSQL and Db2 sinks), see [Distributing the self-managed connectors](#distributing-the-self-managed-connectors-across-two-or-more-vms).
+Kafka Connect runs as two clusters, `connect-source` (the Debezium CDC source) and `connect-sink` (the PostgreSQL and Db2 sinks); each arrow to Confluent Cloud is labelled with the service account it uses (`xxxxxx` is the environment's suffix, see [Service accounts and RBAC](#service-accounts-and-rbac)). **Kafbat UI** manages both Connect clusters through their REST APIs and reads the Kafka cluster and Schema Registry with its own `kafbat-xxxxxx` account. The diagram is generated from [`docs/cc_demo_diagram.svg`](docs/cc_demo_diagram.svg) by `scripts/gen_diagram.py`.
 
-The two optional integrations on the right of the diagram are covered in [Query topics with Lightning Tables and DBeaver](#query-topics-with-lightning-tables-and-dbeaver) and [Confluent MCP server with Claude](#confluent-mcp-server-with-claude): both authenticate with a Global API key and reach Confluent Cloud directly over HTTPS, not through the local Docker stack.
+The two optional integrations at the bottom of the diagram (dashed, DBeaver → Lightning Tables and Claude Code → MCP server) are covered in [Query topics with Lightning Tables and DBeaver](#query-topics-with-lightning-tables-and-dbeaver) and [Confluent MCP server with Claude](#confluent-mcp-server-with-claude): both authenticate with a Global API key and reach Confluent Cloud directly over HTTPS, not through the local Docker stack. Both are **optional and off by default**: turn them on with `ENABLE_LIGHTNING_TABLES=true` / `ENABLE_CONFLUENT_MCP=true` in `.env` (see [Optional features](#optional-features-lightning-tables-and-mcp-server)), or run their scripts by hand.
 
 The demo reuses the parent folder’s data generator, database initialization scripts, Kafka Connect image, CloudBeaver setup and verification script. This folder adds the Confluent Cloud configuration and Cloud-aware orchestration:
 
 | File | What |
 |---|---|
 | `terraform/` | Confluent Cloud environment, Kafka cluster, Schema Registry, service accounts, RBAC role bindings, API keys and topics |
-| `docker-compose.yml` | Databases, data generator, CloudBeaver and two self-managed Kafka Connect clusters (`connect-source` :8083, `connect-sink` :8084) connected to Confluent Cloud (no local Kafka broker, Schema Registry or Control Center) |
+| `docker-compose.yml` | Databases, data generator, CloudBeaver, Kafbat UI (:8080) and two self-managed Kafka Connect clusters (`connect-source` :8083, `connect-sink` :8084) connected to Confluent Cloud (no local Kafka broker, Schema Registry or Control Center) |
 | `connectors/` | The same three connector configurations, with Confluent Cloud credentials injected from the worker environment (`${env:CC_...}`), so the files contain no secrets |
 | `start.sh`, `stop.sh`, `deploy-connectors.sh`, `verify.sh` | Cloud-aware versions of the local scripts |
-| `.env_example` | Template for the credentials (Terraform, Lightning Tables, MCP): copy it to `.env` |
-| `lightning-tables.sh` | Enables Lightning Tables on a few topics, downloads the JDBC driver and writes the DBeaver connection file |
-| `scripts/` | Helpers (`gen_connectors.py` regenerates `connectors/`) |
+| `.env_example` | Template for `.env`: credentials (Terraform, Lightning Tables, MCP), optional feature flags and the Kafbat login |
+| `terraform/kafbat.tf` + Kafbat UI | Kafbat's own service account and the web console for the Confluent Cloud cluster, Schema Registry and both Connect clusters: see [Manage it with Kafbat UI](#manage-it-with-kafbat-ui) |
+| `lightning-tables.sh` | *(optional)* Enables Lightning Tables on a few topics, downloads the JDBC driver and writes the DBeaver connection file |
+| `confluent-mcp.sh` | *(optional)* Registers / removes the Confluent Cloud managed MCP servers in Claude Code |
+| `scripts/` | Helpers (`gen_connectors.py` regenerates `connectors/`, `gen_diagram.py` regenerates the architecture diagram) |
 
 ## What Terraform creates
 
@@ -27,19 +29,20 @@ The demo reuses the parent folder’s data generator, database initialization sc
 | Environment | `db-replication-xxxxxx` (random 6-character suffix), with Stream Governance Essentials |
 | Kafka cluster | Standard cluster, AWS Frankfurt (`eu-central-1`), single zone |
 | Schema Registry | Stream Governance Essentials Schema Registry, provisioned for the environment; Terraform reads back its endpoint |
-| Service accounts | Least privilege, one identity per component, each with its own Kafka and Schema Registry API key (see the table below). `app-manager` is used only by Terraform to create topics |
+| Service accounts | Least privilege, one identity per component (Connect workers, each connector, Kafbat UI), each with its own Kafka and Schema Registry API key (see the table below). `app-manager` is used only by Terraform to create topics |
 | Topics | One compacted, single-partition Kafka topic per table (20, named `cdc.<table>`), Kafka Connect internal topics (3 per Connect cluster), the `_confluent-command` license topic and the Debezium schema history topic |
 
-### Service accounts and RBAC per connector
+### Service accounts and RBAC
 
-One service account per connector, each with its own **Kafka API key** and **Schema Registry API key** (`terraform/service_accounts.tf`). Every row is one role binding.
+One service account per connector, one for the Connect workers and one for the Kafbat UI console, each with its own **Kafka API key** and **Schema Registry API key** (`terraform/service_accounts.tf`, `terraform/kafbat.tf`). Every row is one role binding.
 
-**Names carry the environment's suffix.** Terraform generates one random 6-character suffix per deployment and appends it to the environment, the service accounts and the API keys, so all resources of one run share it. For an environment called `db-replication-1a2b3c`, the accounts in the table below appear in the Confluent Cloud console (**Accounts & access**) as `source-1a2b3c`, `pgsink-1a2b3c`, `db2sink-1a2b3c`, `connect-worker-1a2b3c` and `app-manager-1a2b3c`, and the API keys as `<account>-kafka-key-1a2b3c` / `<account>-sr-key-1a2b3c`. `xxxxxx` stands for that suffix in the table. This lets several copies of the demo coexist in one organization and tells you which environment an account belongs to.
+**Names carry the environment's suffix.** Terraform generates one random 6-character suffix per deployment and appends it to the environment, the service accounts and the API keys, so all resources of one run share it. For an environment called `db-replication-1a2b3c`, the accounts in the table below appear in the Confluent Cloud console (**Accounts & access**) as `source-1a2b3c`, `pgsink-1a2b3c`, `db2sink-1a2b3c`, `connect-worker-1a2b3c`, `kafbat-1a2b3c` and `app-manager-1a2b3c`, and the API keys as `<account>-kafka-key-1a2b3c` / `<account>-sr-key-1a2b3c`. `xxxxxx` stands for that suffix in the table. This lets several copies of the demo coexist in one organization and tells you which environment an account belongs to.
 
-| Connector (Connect cluster) | Service account | Access | Resource | Resource name | Role |
+| Component (Connect cluster) | Service account | Access | Resource | Resource name | Role |
 |---|---|---|---|---|---|
 | `mssql-cdc-source` (`connect-source`) | `source-xxxxxx` | **read/write** | Kafka topic | `cdc.*` | `DeveloperWrite` |
 | | | read/write | Kafka topic | `mssql.schema-history` | `ResourceOwner` |
+| | | read | Kafka consumer group | `mssql-schemahistory` (Debezium reads its schema history back on restart) | `DeveloperRead` |
 | | | **write** | Schema Registry subject | `cdc.*` | `DeveloperWrite` |
 | `postgres-sink` (`connect-sink`) | `pgsink-xxxxxx` | **read only** | Kafka topic | `cdc.*` | `DeveloperRead` |
 | | | read only | Kafka consumer group | `connect-postgres-sink` | `DeveloperRead` |
@@ -50,16 +53,22 @@ One service account per connector, each with its own **Kafka API key** and **Sch
 | both Connect workers (no connector) | `connect-worker-xxxxxx` | internal only | Kafka topic | `docker-connect-*` | `ResourceOwner` |
 | | | internal only | Kafka topic | `_confluent-command` (Connect license) | `ResourceOwner` |
 | | | internal only | Kafka consumer group | `db-replication-connect-*` | `ResourceOwner` |
+| Kafbat UI (DevOps console) | `kafbat-xxxxxx` | **read all** | Kafka topic | `*` | `DeveloperRead` |
+| | | read all | Kafka consumer group | `*` | `DeveloperRead` |
+| | | **write** connector topics | Kafka topic | `cdc.*`, `mssql.schema-history` | `DeveloperWrite` |
+| | | **read all** | Schema Registry subject | `*` | `DeveloperRead` |
+| | | **write** connector subjects | Schema Registry subject | `cdc.*` | `DeveloperWrite` |
 | Terraform (provisioning only) | `app-manager-xxxxxx` | admin | Environment | whole environment | `EnvironmentAdmin` |
 
 What this means in practice:
 
 * **Sinks are read only**: they can consume `cdc.*` and read schemas, but cannot produce to any topic or register a schema, and each can only use its own consumer group (so `pgsink` cannot join or commit offsets for the Db2 sink's group).
-* **The source is write only on data**: it can produce to `cdc.*` and register schemas for `cdc.*` subjects, but has no consumer group and cannot read other topics. It owns the Debezium schema history topic, which it must both write and read back.
+* **The source is write only on data**: it can produce to `cdc.*` and register schemas for `cdc.*` subjects, and cannot read other topics. It owns the Debezium schema history topic, which it must both write and read back (with its own consumer group `mssql-schemahistory`, used when the connector restarts).
 * **The worker identity has no access to table data or Schema Registry**: it only manages the Connect internal topics and the worker groups.
-* Because the source and sinks have separate credentials, revoking one (for example a compromised sink key) does not affect the others.
+* **Kafbat (DevOps console) reads everything but writes only where the connectors write**: it can browse every topic, consumer group and subject, and produce only to `cdc.*` / `mssql.schema-history` and register only `cdc.*` schemas. It cannot create, delete or reconfigure topics. Managing connectors in Kafbat goes through the Connect REST API, not this account (see [Manage it with Kafbat UI](#manage-it-with-kafbat-ui)).
+* Because the source, sinks and Kafbat have separate credentials, revoking one (for example a compromised sink key) does not affect the others.
 
-Each connector authenticates with its own account through `producer.override.*` / `consumer.override.*` and its own Avro converter settings (the workers run with `connector.client.config.override.policy=All`). A sink cannot write to a topic or register a schema, and the source cannot consume.
+Each connector authenticates with its own account through `producer.override.*` / `consumer.override.*` and its own Avro converter settings (the workers run with `connector.client.config.override.policy=All`). A sink cannot write to a topic or register a schema, and the source can only read back its own schema history topic.
 
 The environment as it appears in the Confluent Cloud console after `./start.sh`: the `cc-demo-main` Standard cluster running on AWS `eu-central-1`, 28 topics and the Essentials governance package. It shows 0 connectors because they run self-managed in your Docker, not in Confluent Cloud.
 
@@ -93,24 +102,39 @@ cp .env_example .env # then edit .env: fill in the values before running anythin
 |---|---|---|
 | `CONFLUENT_CLOUD_API_KEY` / `CONFLUENT_CLOUD_API_SECRET` | `start.sh`, `stop.sh` (Terraform) and `lightning-tables.sh` (enable topics) | Cloud resource management |
 | `CONFLUENT_GLOBAL_API_KEY` / `CONFLUENT_GLOBAL_API_SECRET` | Lightning Tables JDBC driver and the Confluent MCP server | Global access |
+| `ENABLE_LIGHTNING_TABLES` / `ENABLE_CONFLUENT_MCP` (optional, default `false`) | Turn the [optional features](#optional-features-lightning-tables-and-mcp-server) on | `true` / `false` |
+| `KAFBAT_USER` / `KAFBAT_PASSWORD` (optional) | Kafbat UI login, default `devops` / `Devops123` | not a Confluent key |
+| `MSSQL_AUTO_RESTART` (optional, default `1`) | `deploy-connectors.sh`: restart a hung SQL Server before deploying (`1`) or only report it (`0`) | `1` / `0` |
 
 `.env` is git-ignored. Variables already exported in your shell take precedence over the file, and the scripts prompt for any Terraform key that is still missing.
 
 ```bash
-./start.sh # reads .env (or prompts for CONFLUENT_CLOUD_API_KEY / CONFLUENT_CLOUD_API_SECRET), provisions the Cloud resources, then starts the local databases, generator and the two Kafka Connect clusters
+./start.sh # reads .env (or prompts for CONFLUENT_CLOUD_API_KEY / CONFLUENT_CLOUD_API_SECRET), provisions the Cloud resources, then starts the local databases, generator, the two Kafka Connect clusters and Kafbat UI
 ./deploy-connectors.sh # SQL Server CDC source + PostgreSQL sink + Db2 sink (or: source | sinks)
 ./verify.sh # live view of data_sensors on SQL Server, PostgreSQL and Db2, refreshed every 10s (Ctrl+C to stop); ./verify.sh counts = per-table row counts
 ./stop.sh # removes the local stack and asks whether to destroy the Cloud resources too
 ```
 
 * Credentials are read from `.env` or the environment; otherwise `start.sh` prompts for the Terraform key (the secret is not echoed). The scripts never write them anywhere else. Terraform needs them again if you choose to destroy the Cloud resources with `./stop.sh`.
-* At the end, `start.sh` prints the **Confluent Cloud console link** for the new Kafka cluster, the Schema Registry endpoint and the local URLs. CloudBeaver (`http://localhost:8978`) has the three database connections preloaded, as in the local demo.
+* At the end, `start.sh` prints the **Confluent Cloud console link** for the new Kafka cluster, the Schema Registry endpoint and the local URLs. CloudBeaver (`http://localhost:8978`) has the three database connections preloaded, as in the local demo, and Kafbat UI (`http://localhost:8080`, `devops` / `Devops123`) shows the Confluent Cloud cluster, Schema Registry and both Connect clusters.
+* `./deploy-connectors.sh` is defensive: before deploying the source it health-checks SQL Server (`SELECT 1` within 10 s, and no request stuck for more than 60 s). SQL Server 2019 only ships an x86 image, emulated on Apple Silicon, and can occasionally hang on a commit; if that happens the script restarts the `mssql` container (data is kept, the generator reconnects) before deploying, or only reports it with `MSSQL_AUTO_RESTART=0`. A REST call that times out while Connect validates a connector is retried, and the script waits until every connector and task is `RUNNING` (exit code 1 with the stack trace if one fails).
 * Non-interactive use: `ASSUME_YES=1 ./start.sh`, `DESTROY_CLOUD=1 ./stop.sh`, `KEEP_COLIMA=1 ./stop.sh`.
 * `SKIP_TERRAFORM=1 ./start.sh` reuses the already deployed environment (`cloud.env`) without running Terraform.
 * **Every start is a clean demo:** the local databases are recreated and Terraform recreates the empty Kafka topics, so SQL Server, Kafka and both targets begin in sync.
 * The change intervals are the same as in the local demo: `OPS_INTERVAL_SECONDS` and `SENSOR_INTERVAL_SECONDS` (default 10 seconds).
 
-Watch the demo in Confluent Cloud (topics, messages with tombstones, schemas and consumer lag for the two sink consumer groups) and compare the three databases in CloudBeaver. See the [main README](../README.md#see-it-in-action) for screenshots.
+Watch the demo in Confluent Cloud or Kafbat UI (topics, messages with tombstones, schemas, consumer lag for the two sink consumer groups and, in Kafbat, the connectors themselves) and compare the three databases in CloudBeaver. See the [main README](../README.md#see-it-in-action) for screenshots.
+
+### Optional features: Lightning Tables and MCP server
+
+Both integrations are off by default and need the Global API key (`CONFLUENT_GLOBAL_API_KEY` / `_SECRET` in `.env`). Set a flag to `true` in `.env` and the normal scripts take care of the rest:
+
+| Flag in `.env` | When `true` | Turn it off / undo |
+|---|---|---|
+| `ENABLE_LIGHTNING_TABLES` | `./deploy-connectors.sh` waits until the source has registered the schemas of `$TOPICS` (default `cdc.data_sensors cdc.customers cdc.orders cdc.products`), then runs `./lightning-tables.sh`: enables the topics, downloads the JDBC driver and writes the DBeaver properties file. See [Query topics with Lightning Tables and DBeaver](#query-topics-with-lightning-tables-and-dbeaver). | `./lightning-tables.sh disable`; destroying the environment removes them too |
+| `ENABLE_CONFLUENT_MCP` | `./start.sh` runs `./confluent-mcp.sh`: registers `confluent-mcp-global` and `confluent-mcp-regional` (for this environment's organization and region) in Claude Code, scope `CONFLUENT_MCP_SCOPE` (default `user`). Skipped with a message if the `claude` CLI is missing. See [Confluent MCP server with Claude](#confluent-mcp-server-with-claude). | `./confluent-mcp.sh remove`; `./stop.sh` removes them when it destroys the environment |
+
+Values `true`, `yes`, `1` or `on` (any case) enable a feature; anything else, or no value, leaves it off. With the flags off, you can still run `./lightning-tables.sh` and `./confluent-mcp.sh` by hand at any time.
 
 ## Test it
 
@@ -159,7 +183,9 @@ What these look like once the connectors are running:
 
 ![Stream lineage in Confluent Cloud](docs/confluent_cloud-stream_lineage.png)
 
-**5. Kafka Connect from the command line:** `curl -s localhost:8083/connectors?expand=status` (source cluster) and `curl -s localhost:8084/connectors?expand=status` (sink cluster), or `docker logs -f connect-source` / `docker logs -f connect-sink`.
+**5. Kafbat UI** (`http://localhost:8080`, `devops` / `Devops123`): connectors of both Connect clusters, topics, consumer lag and schemas in one place, see [Manage it with Kafbat UI](#manage-it-with-kafbat-ui).
+
+**6. Kafka Connect from the command line:** `curl -s 'localhost:8083/connectors?expand=status'` (source cluster) and `curl -s 'localhost:8084/connectors?expand=status'` (sink cluster; keep the quotes in zsh), or `docker logs -f connect-source` / `docker logs -f connect-sink`.
 
 ## Visualise the data
 
@@ -203,6 +229,56 @@ docker exec db2 su - db2inst1 -c 'db2 connect to demo > /dev/null && db2 "select
 
 Notes: Db2 table and column names are lowercase and **quoted** (`"orders"`, `"order_id"`). To see the changes arrive faster, shorten the generator intervals, for example `OPS_INTERVAL_SECONDS=1 SENSOR_INTERVAL_SECONDS=1 ./start.sh`, or on a running stack `OPS_INTERVAL_SECONDS=2 SENSOR_INTERVAL_SECONDS=2 docker compose up -d data-generator` (use `docker-compose` if you have the standalone binary).
 
+## Manage it with Kafbat UI
+
+[Kafbat UI](https://github.com/kafbat/kafka-ui) (the open-source successor of *UI for Apache Kafka*) runs in Docker next to the Connect workers and gives a DevOps user one web console for the whole pipeline, instead of the Kafka Connect REST API alone:
+
+* **Kafka Connect**: both self-managed clusters (`connect-source`, `connect-sink`) are registered. List connectors and their tasks, see status and stack traces of failed tasks, **pause / resume / restart** a connector or a single task, edit a connector's configuration, create or delete connectors.
+* **Topics** in Confluent Cloud: messages (with Avro decoded through Schema Registry), partitions and offsets; produce a test message to a `cdc.*` topic. The topic **Settings** tab may stay empty, because `DeveloperRead` does not necessarily include reading topic configuration.
+* **Consumers**: the sink groups `connect-postgres-sink` / `connect-db2-sink` and their lag per partition.
+* **Schema Registry** (Confluent Cloud, Kafbat's own `kafbat-xxxxxx` Schema Registry API key): subjects, versions, compatibility and schema diffs of the `cdc.*` schemas. Message keys and values are both decoded with Schema Registry by default (`KAFKA_CLUSTERS_0_DEFAULTKEYSERDE` / `DEFAULTVALUESERDE=SchemaRegistry`), so **Topics** → **Messages** shows the primary key and the row as JSON instead of Avro bytes.
+
+Open **http://localhost:8080** and log in as `devops` / `Devops123` (set `KAFBAT_USER` / `KAFBAT_PASSWORD` in `.env` to change them before `./start.sh`).
+
+**Identity.** Kafbat has its **own service account, `kafbat-xxxxxx`**, with its own Kafka and Schema Registry API keys (`terraform/kafbat.tf`, see the [RBAC table](#service-accounts-and-rbac)). It can **read every topic, consumer group and subject**, and **write only to the topics and subjects the connectors use** (`cdc.*`, `mssql.schema-history`). It cannot create or delete topics, change topic configuration, or write to the Connect internal topics. Connector actions do not use this account at all: Kafbat calls the Connect REST API (`http://connect-source:8083`, `http://connect-sink:8083`) and the connectors keep running with their own service accounts. Connector credentials stay hidden in Kafbat too, because the configs only hold `${env:...}` references.
+
+What it looks like with the connectors running:
+
+**Dashboard**: one cluster, `confluent-cloud`, online, with 28 topics / partitions. Production and consumption show 0 bytes because Confluent Cloud does not expose broker JMX metrics to external tools (use the Cloud console or the Metrics API for throughput).
+
+![Kafbat UI dashboard](docs/kafbat-dashboard.png)
+
+**Brokers**: the Confluent Cloud cluster as Kafbat sees it: 12 brokers, all 28 partitions online and every replica in sync (84 of 84, replication factor 3). Disk usage and the version are not reported by Confluent Cloud, hence `N/A` / `Unknown`.
+
+![Kafbat UI brokers view of the Confluent Cloud cluster](docs/kafbat-confluent-cloud-brokers.png)
+
+**Topics**: the `cdc.*` table topics plus the internal ones (here with **Show Internal Topics** on), each with 1 partition and replication factor 3. Open a topic and its **Messages** tab to see the decoded key and row, including tombstones for deletes.
+
+![Kafbat UI topics](docs/kafbat-confluent-cloud-topics.png)
+
+**Schema Registry**: the `-key` and `-value` Avro subjects registered by the source for every `cdc.*` topic, with `BACKWARD` compatibility. Open a subject for its versions and to compare them.
+
+![Kafbat UI Schema Registry subjects](docs/kafbat-confluent-cloud-schemas.png)
+
+**Kafka Connect → Clusters**: the two self-managed Connect clusters, `connect-source` (1 connector, 1 task) and `connect-sink` (2 connectors, 4 tasks).
+
+![Kafbat UI Kafka Connect clusters](docs/kafbat-connect-clusters.png)
+
+**Kafka Connect → Connectors**, filtered on `connect-source`: the Debezium `mssql-cdc-source` connector, `RUNNING` with 1/1 tasks, and the 20 `cdc.*` topics it writes. The menu on the right pauses, resumes, restarts or deletes it; clicking the name opens its tasks, configuration (editable) and the stack trace of a failed task.
+
+![Kafbat UI source connector](docs/kafbat-connector-source.png)
+
+**Kafka Connect → Connectors**, filtered on `connect-sink`: the `db2-sink` and `postgres-sink` JDBC connectors, each `RUNNING` with 2/2 tasks and subscribed to the same 20 `cdc.*` topics.
+
+![Kafbat UI sink connectors](docs/kafbat-connector-sink.png)
+
+Notes for production:
+
+* Anyone who can log in to Kafbat can manage the connectors, because the Connect REST API itself has no authentication. Put Kafbat behind SSO: it supports **OAuth2/OIDC** (Okta, Azure AD, Keycloak, GitHub) and LDAP, with its own **RBAC** (for example a `devops` role that may restart connectors and a `viewer` role that may only read), configured in its `application.yaml`. The single login form used here is for the demo only.
+* Keep the Connect REST ports reachable only from Kafbat and your automation (private network or reverse proxy), so Kafbat's access control cannot be bypassed.
+* If you prefer a read-only console for some users, run a second Kafbat with `KAFKA_CLUSTERS_0_READONLY=true` and a read-only service account.
+* With more Connect clusters or VMs, register each cluster once with its load-balanced REST address (`KAFKA_CLUSTERS_0_KAFKACONNECT_n_ADDRESS`), not every worker.
+
 ## Query topics with Lightning Tables and DBeaver
 
 [Lightning Tables](https://docs.confluent.io/cloud/current/lightning-tables/overview.html) turn Kafka topics into SQL tables that you can query with a plain `SELECT`, from any JDBC client, without a connector or a Flink compute pool. Here DBeaver on your machine queries the replicated topics straight from Confluent Cloud, with the new [Confluent JDBC driver](https://docs.confluent.io/cloud/current/lightning-tables/query/jdbc.html):
@@ -211,7 +287,7 @@ Notes: Db2 table and column names are lowercase and **quoted** (`"orders"`, `"or
 
 Requirements: an AWS cluster in a Lightning Tables region (this demo uses `eu-central-1`), a schema on the topic (Debezium has registered Avro schemas) and the Global API key from [Prerequisites](#prerequisites). The topics are compacted, so each table is in *upsert* mode and shows the latest row per key. The driver is read-only (`SELECT` only).
 
-**1. Prepare** (after `./start.sh` and `./deploy-connectors.sh`, with `.env` filled in):
+**1. Prepare** (after `./start.sh` and `./deploy-connectors.sh`, with `.env` filled in). With `ENABLE_LIGHTNING_TABLES=true` in `.env`, `./deploy-connectors.sh` does this step for you; otherwise run:
 
 ```bash
 ./lightning-tables.sh # enables cdc.data_sensors, cdc.customers, cdc.orders and cdc.products
@@ -253,7 +329,9 @@ The topic names contain a dot (`cdc.<table>`), so quote them with backticks (`` 
 
 The [Confluent Cloud managed MCP server](https://docs.confluent.io/cloud/current/ai/ai-tools/managed-mcp-server.html) is hosted by Confluent: nothing runs locally. It lets Claude inspect the environment and clusters, check and restart connectors and query metrics. The regional server also reads topics and schemas and runs Flink SQL. Use the same Global API key (`CONFLUENT_GLOBAL_API_KEY` in `.env`), as an HTTP Basic header.
 
-**Claude Code** (run from `confluent_cloud/`; the header value is built from `.env` so the secret is not typed):
+**Claude Code, automatically:** set `ENABLE_CONFLUENT_MCP=true` in `.env` and `./start.sh` registers both servers below (the regional one with your organization ID, read by Terraform), or run `./confluent-mcp.sh` at any time; `./confluent-mcp.sh remove` removes them.
+
+**Claude Code, by hand** (run from `confluent_cloud/`; the header value is built from `.env` so the secret is not typed):
 
 ```bash
 set -a; source .env; set +a
@@ -295,15 +373,15 @@ Terraform state is kept locally in `terraform/terraform.tfstate`. If you lose it
 * The two Kafka Connect workers (`docker-compose.yml`: `connect-source` for the CDC source, `connect-sink` for the JDBC sinks, each with its own group id and internal topics) use `SASL_SSL` + `PLAIN` with the `connect-worker` account’s Kafka API key for the worker itself. Each connector overrides the producer/consumer credentials with its own service account, and its Avro converters authenticate to Schema Registry with that account’s Schema Registry API key using `USER_INFO`.
 * Connector configurations reference credentials as `${env:CC_SOURCE_KAFKA_API_KEY}`, `${env:CC_PGSINK_SR_API_SECRET}`, etc. Kafka Connect’s `EnvVarConfigProvider` resolves them from the worker environment (populated from `cloud.env`), so credentials do not appear in the JSON files or Kafka Connect REST API output. Debezium’s schema history client uses the same settings under `schema.history.internal.producer|consumer|admin.*`.
 * The sink connectors strip the `cdc.` prefix (RegexRouter) so the target tables keep their original names.
-* Kafka Connect internal topics, the Debezium schema history topic and the table topics are created by Terraform. Confluent Cloud sets the replication factor to 3, so the connectors do not need topic-creation permissions at runtime.
-* `cloud.env` (API keys, Kafka and Schema Registry endpoints), `.env`, `lightning-jdbc.properties` and the Terraform state contain sensitive values; all are git-ignored.
+* Kafka Connect internal topics, the `_confluent-command` license topic, the Debezium schema history topic and the table topics are created by Terraform. Confluent Cloud sets the replication factor to 3, so the connectors do not need topic-creation permissions at runtime.
+* `cloud.env` (API keys of all service accounts, including Kafbat's, and the Kafka and Schema Registry endpoints), `.env`, `lightning-jdbc.properties` and the Terraform state contain sensitive values; all are git-ignored.
 
 ## Taking it to production: best practices
 
 The demo keeps a few shortcuts so it runs on a laptop. This section lists what to change for a production setup, in order of importance.
 
 ### Identity and access
-* **One service account per connector, least privilege** (already done here, see [What Terraform creates](#what-terraform-creates)): source `DeveloperWrite`, sinks `DeveloperRead`, a worker identity with no access to table data. Bind roles to **topic prefixes** (`cdc.*`) instead of `*`, so a new table needs no new binding, and to **named consumer groups** for the sinks.
+* **One service account per connector, least privilege** (already done here, see [What Terraform creates](#what-terraform-creates)): source `DeveloperWrite`, sinks `DeveloperRead`, a worker identity with no access to table data, and a separate identity for human tooling (Kafbat) so operator access can be audited and revoked without touching the pipeline. Bind roles to **topic prefixes** (`cdc.*`) instead of `*`, so a new table needs no new binding, and to **named consumer groups** for the sinks.
 * **Separate the provisioning identity from the runtime identities.** `app-manager` (topic creation) is used only by Terraform; the demo gives it `EnvironmentAdmin`. In production scope it to the cluster, or run Terraform from CI with a short-lived Cloud API key.
 * **Rotate API keys.** Keys are created per service account, so one can be replaced without touching the others. For production prefer **OAuth/OIDC identity pools** over static API keys if your security team requires short-lived credentials.
 * **Do not keep secrets in files or images.** The demo passes them through `cloud.env` and `${env:...}`. In production inject them from a secret manager (HashiCorp Vault, AWS Secrets Manager, Docker/Swarm secrets) and resolve them with a `ConfigProvider` (`FileConfigProvider` with files mounted as secrets, or a Vault provider), so they never show in `docker inspect` or the Connect REST API.

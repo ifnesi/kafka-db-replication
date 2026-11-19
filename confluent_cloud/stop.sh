@@ -32,4 +32,7 @@ else
   echo "No Confluent Cloud resources in the Terraform state."
 fi
 
+# optional Confluent MCP servers in Claude Code: remove them with the environment they point to
+if is_true "$ENABLE_CONFLUENT_MCP" && [ "$destroy" = "1" ]; then ./confluent-mcp.sh remove; fi
+
 [ -n "$KEEP_COLIMA" ] || colima_stop

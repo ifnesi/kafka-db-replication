@@ -68,6 +68,14 @@ resource "confluent_role_binding" "source_schema_history" {
   role_name   = "ResourceOwner" # reads and writes (and describes) its own history topic
   crn_pattern = "${local.kafka_crn}/topic=mssql.schema-history"
 }
+# Debezium reads the schema history back with consumer group <topic.prefix>-schemahistory when it
+# restarts with existing offsets (redeploy, worker restart): without this the task fails with
+# GroupAuthorizationException
+resource "confluent_role_binding" "source_schema_history_group" {
+  principal   = "User:${confluent_service_account.connector["source"].id}"
+  role_name   = "DeveloperRead"
+  crn_pattern = "${local.kafka_crn}/group=mssql-schemahistory"
+}
 resource "confluent_role_binding" "source_subjects" {
   principal   = "User:${confluent_service_account.connector["source"].id}"
   role_name   = "DeveloperWrite" # register schemas (and read them back)
@@ -132,7 +140,7 @@ resource "confluent_api_key" "connector_kafka" {
     }
   }
   depends_on = [
-    confluent_role_binding.source_topics, confluent_role_binding.source_schema_history,
+    confluent_role_binding.source_topics, confluent_role_binding.source_schema_history, confluent_role_binding.source_schema_history_group,
     confluent_role_binding.sink_topics, confluent_role_binding.sink_group,
   ]
 }

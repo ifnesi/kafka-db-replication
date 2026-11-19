@@ -10,6 +10,12 @@ resource "confluent_environment" "cc_demo_env" {
     prevent_destroy = false
   }
 }
+# Organization of the Cloud API key (its ID is used for the regional Confluent MCP server URL)
+data "confluent_organization" "org" {}
+output "cc_org_id" {
+  value = data.confluent_organization.org.id
+}
+
 output "cc_demo_env" {
   description = "CC Environment"
   value       = resource.confluent_environment.cc_demo_env.id
@@ -131,6 +137,8 @@ resource "time_sleep" "wait_for_rbac" {
     confluent_api_key.connect_kafka,
     confluent_api_key.connector_kafka,
     confluent_api_key.connector_sr,
+    confluent_api_key.kafbat_kafka,
+    confluent_api_key.kafbat_sr,
   ]
 }
 
